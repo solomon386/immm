@@ -489,6 +489,10 @@ input:focus {
   justify-content: flex-end;
 }
 
+.calls-disabled .call-actions {
+  display: none;
+}
+
 .call-btn {
   padding: 12px 16px;
   border-radius: 14px;

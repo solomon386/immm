@@ -10,6 +10,7 @@ const state = {
   friendResponses: [],
   socket: null,
   call: null,
+  callsEnabled: false,
   contextFriendId: null,
   contextMessageId: null,
   editingMessageId: null
@@ -138,7 +139,48 @@ function showAuth() {
   authView.classList.remove('hidden');
 }
 
+function clearLocalUserData() {
+  localStorage.removeItem('token');
+  state.token = null;
+  state.me = null;
+  state.friends = [];
+  state.requests = [];
+  state.selectedFriend = null;
+  state.messages = [];
+  state.unreadFriendIds.clear();
+  state.friendResponses = [];
+  state.contextFriendId = null;
+  state.contextMessageId = null;
+  state.editingMessageId = null;
+
+  authForm.reset();
+  authTip.textContent = '';
+  $('#myName').textContent = '未登录';
+  $('#myUsername').textContent = '';
+  setAvatar($('#myAvatar'), null);
+  profileForm.classList.add('hidden');
+  profileDisplayName.value = '';
+  profileAvatarInput.value = '';
+  profileAvatarFilename.textContent = '未选择文件';
+  searchResults.innerHTML = '';
+  searchResults.className = 'list compact';
+  $('#searchInput').value = '';
+  renderFriends();
+  renderRequests();
+  renderFriendResponses();
+  hideFriendContextMenu();
+  hideMessageContextMenu();
+  resetConversation();
+}
+
+async function loadConfig() {
+  const data = await api('/api/config');
+  state.callsEnabled = Boolean(data.features?.callsEnabled);
+  document.body.classList.toggle('calls-disabled', !state.callsEnabled);
+}
+
 async function boot() {
+  await loadConfig();
   if (!state.token) {
     showAuth();
     return;
@@ -148,8 +190,7 @@ async function boot() {
     connectSocket();
     showChat();
   } catch {
-    localStorage.removeItem('token');
-    state.token = null;
+    clearLocalUserData();
     showAuth();
   }
 }
@@ -269,6 +310,7 @@ authForm.addEventListener('submit', async event => {
     });
     state.token = data.token;
     localStorage.setItem('token', data.token);
+    await loadConfig();
     await loadMe();
     connectSocket();
     showChat();
@@ -335,16 +377,19 @@ profileForm.addEventListener('submit', async event => {
   }
 });
 
-$('#logoutBtn').addEventListener('click', () => {
-  localStorage.removeItem('token');
-  state.token = null;
-  state.me = null;
-  state.selectedFriend = null;
-  state.messages = [];
-  state.unreadFriendIds.clear();
-  resetMessageEditor();
+$('#logoutBtn').addEventListener('click', async () => {
+  const socket = state.socket;
+  if (socket?.connected) {
+    try {
+      await socket.timeout(1000).emitWithAck('auth:logout');
+    } catch {
+      // 即使退出通知超时，也继续清理本地登录态。
+    }
+  }
   endCall(false);
-  if (state.socket) state.socket.disconnect();
+  if (socket) socket.disconnect();
+  state.socket = null;
+  clearLocalUserData();
   showAuth();
 });
 
@@ -641,8 +686,8 @@ async function selectFriend(friend) {
   messageInput.disabled = false;
   fileInput.disabled = false;
   sendBtn.disabled = false;
-  voiceCallBtn.disabled = !friend.online;
-  videoCallBtn.disabled = !friend.online;
+  voiceCallBtn.disabled = !state.callsEnabled || !friend.online;
+  videoCallBtn.disabled = !state.callsEnabled || !friend.online;
   updateChatHeader();
   renderFriends();
   renderMessages();
@@ -652,9 +697,11 @@ async function selectFriend(friend) {
 function updateChatHeader() {
   if (!state.selectedFriend) return;
   $('#chatTitle').textContent = state.selectedFriend.displayName;
-  $('#chatStatus').textContent = state.selectedFriend.online ? '在线，可发起语音或视频通话' : '离线，消息会保存在聊天记录中';
-  voiceCallBtn.disabled = !state.selectedFriend.online || Boolean(state.call);
-  videoCallBtn.disabled = !state.selectedFriend.online || Boolean(state.call);
+  $('#chatStatus').textContent = state.selectedFriend.online
+    ? (state.callsEnabled ? '在线，可发起语音或视频通话' : '在线')
+    : '离线，消息会保存在聊天记录中';
+  voiceCallBtn.disabled = !state.callsEnabled || !state.selectedFriend.online || Boolean(state.call);
+  videoCallBtn.disabled = !state.callsEnabled || !state.selectedFriend.online || Boolean(state.call);
 }
 
 function renderMessages() {
@@ -917,6 +964,10 @@ function startVideoCall() {
 
 async function startMediaCall(type) {
   if (!state.selectedFriend || state.call) return;
+  if (!state.callsEnabled) {
+    toast('语音和视频聊天功能已关闭', true);
+    return;
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
     toast('当前浏览器不支持麦克风或摄像头采集', true);
     return;

@@ -22,10 +22,8 @@
 - 语音消息上传和播放
 - 视频消息上传和播放
 - 上传文件安全校验，包括扩展名、MIME 类型、文件头和大小限制
-- 一对一实时语音通话
-- 一对一实时视频通话
-- 语音/视频通话接听、拒绝、挂断
-- 本地聊天记录持久化到 `data.json`
+- 一对一实时语音/视频通话，支持全局开关，默认关闭
+- 聊天记录持久化到数据库，开发环境 SQLite，生产环境 MySQL
 - Web 接口层日志系统，区分开发环境和生产环境
 
 ## 运行方式
@@ -41,6 +39,38 @@ npm start
 
 ```text
 http://localhost:3000
+```
+
+## 数据库配置
+
+项目已接入数据库持久化：
+
+- 开发环境：默认使用 SQLite，数据文件为 `data.sqlite`。
+- 生产环境：默认使用 MySQL，需要提前创建数据库。
+- 测试环境：使用内存存储，不写入真实数据库。
+
+开发环境可指定 SQLite 文件位置：
+
+```bash
+SQLITE_FILE=./dev.sqlite npm start
+```
+
+生产环境可使用 MySQL 环境变量：
+
+```bash
+NODE_ENV=production MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_PASSWORD=your_password MYSQL_DATABASE=web_im_chat npm start
+```
+
+也可以使用连接串：
+
+```bash
+NODE_ENV=production DATABASE_URL=mysql://user:password@127.0.0.1:3306/web_im_chat npm start
+```
+
+语音和视频聊天默认关闭。如需开启，请在启动时设置：
+
+```bash
+ENABLE_CALLS=true npm start
 ```
 
 生产环境启动：

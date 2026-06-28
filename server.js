@@ -9,17 +9,18 @@ import { v4 as uuid } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createDataStore } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const DATA_FILE = path.join(__dirname, 'data.json');
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const LOG_DIR = path.join(__dirname, 'logs');
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = NODE_ENV === 'production';
 const IS_TEST = NODE_ENV === 'test';
+const CALLS_ENABLED = process.env.ENABLE_CALLS === 'true';
 const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 const UPLOAD_RULES = {
   image: {
@@ -42,27 +43,13 @@ const UPLOAD_RULES = {
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (IS_PRODUCTION && !fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
-const defaultData = {
-  users: [],
-  friendRequests: [],
-  friendships: [],
-  messages: []
-};
-
-function loadData() {
-  if (!fs.existsSync(DATA_FILE)) return structuredClone(defaultData);
-  try {
-    return { ...structuredClone(defaultData), ...JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')) };
-  } catch {
-    return structuredClone(defaultData);
-  }
-}
-
-let db = loadData();
+const dataStore = await createDataStore(NODE_ENV);
+let db = await dataStore.load();
 
 function saveData() {
-  if (IS_TEST) return;
-  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+  dataStore.save(db).catch(error => {
+    console.error('[database] 保存数据失败', error);
+  });
 }
 
 function setDbForTest(nextDb) {
@@ -70,6 +57,7 @@ function setDbForTest(nextDb) {
     throw new Error('setDbForTest 只能在测试环境使用');
   }
   db = nextDb;
+  saveData();
 }
 
 function getDbForTest() {
@@ -160,6 +148,18 @@ function forwardCallEvent(socket, event, payload = {}) {
     fromUser: publicUser(socket.user)
   });
   return true;
+}
+
+function removeOnlineSocket(socket) {
+  const current = onlineUsers.get(socket.user.id);
+  if (!current) return false;
+  current.delete(socket.id);
+  if (current.size === 0) {
+    onlineUsers.delete(socket.user.id);
+    io.emit('presence:update', { userId: socket.user.id, online: false });
+    return true;
+  }
+  return false;
 }
 
 function uploadTypeFromMime(mime) {
@@ -437,6 +437,14 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/api/config', (req, res) => {
+  res.json({
+    features: {
+      callsEnabled: CALLS_ENABLED
+    }
+  });
+});
+
 app.post('/api/auth/register', async (req, res) => {
   const { username, password, displayName } = req.body;
   if (!username || !password) return res.status(400).json({ message: '用户名和密码不能为空' });
@@ -685,6 +693,11 @@ io.on('connection', socket => {
   onlineUsers.set(socket.user.id, sockets);
   io.emit('presence:update', { userId: socket.user.id, online: true });
 
+  socket.on('auth:logout', ack => {
+    const offline = removeOnlineSocket(socket);
+    if (typeof ack === 'function') ack({ ok: true, offline });
+  });
+
   socket.on('message:send', payload => {
     const { to, type, text, file } = payload || {};
     if (!to || !areFriends(socket.user.id, to)) {
@@ -818,6 +831,10 @@ io.on('connection', socket => {
   });
 
   socket.on('call:invite', payload => {
+    if (!CALLS_ENABLED) {
+      socket.emit('call:error', { message: '语音和视频聊天功能已关闭' });
+      return;
+    }
     const { to } = payload || {};
     if (!onlineUsers.get(to)) {
       socket.emit('call:error', { message: '对方当前不在线，无法发起视频通话' });
@@ -827,41 +844,42 @@ io.on('connection', socket => {
   });
 
   socket.on('call:accept', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:accepted', payload);
   });
 
   socket.on('call:reject', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:rejected', payload);
   });
 
   socket.on('call:cancel', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:canceled', payload);
   });
 
   socket.on('call:end', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:ended', payload);
   });
 
   socket.on('call:offer', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:offer', payload);
   });
 
   socket.on('call:answer', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:answer', payload);
   });
 
   socket.on('call:ice', payload => {
+    if (!CALLS_ENABLED) return;
     forwardCallEvent(socket, 'call:ice', payload);
   });
 
   socket.on('disconnect', () => {
-    const current = onlineUsers.get(socket.user.id);
-    if (!current) return;
-    current.delete(socket.id);
-    if (current.size === 0) {
-      onlineUsers.delete(socket.user.id);
-      io.emit('presence:update', { userId: socket.user.id, online: false });
-    }
+    removeOnlineSocket(socket);
   });
 });
 
