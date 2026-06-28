@@ -45,7 +45,7 @@ http://localhost:3000
 
 项目已接入数据库持久化：
 
-- 开发环境：默认使用 SQLite，数据文件为 `data.sqlite`。
+- 开发环境：默认使用 SQLite，数据文件为 `dev.sqlite`。
 - 生产环境：默认使用 MySQL，需要提前创建数据库。
 - 测试环境：使用内存存储，不写入真实数据库。
 
@@ -65,6 +65,39 @@ NODE_ENV=production MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_P
 
 ```bash
 NODE_ENV=production DATABASE_URL=mysql://user:password@127.0.0.1:3306/web_im_chat npm start
+```
+
+## 数据库迁移
+
+项目提供迁移管理脚本，用于模型数据结构变化后同步修改数据库。迁移文件按数据库类型分别存放：
+
+- SQLite：`migrations/sqlite/*.sql`
+- MySQL：`migrations/mysql/*.sql`
+
+查看迁移状态：
+
+```bash
+npm run db:migrate:status
+```
+
+执行未执行的迁移：
+
+```bash
+npm run db:migrate
+```
+
+创建一组新的迁移文件：
+
+```bash
+npm run db:migration:create -- add_user_last_login
+```
+
+该命令会同时创建 SQLite 和 MySQL 两份 SQL 文件。模型字段或表结构变化时，请分别补充两个文件中的 SQL，再执行 `npm run db:migrate`。
+
+生产环境执行 MySQL 迁移示例：
+
+```bash
+NODE_ENV=production MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_PASSWORD=your_password MYSQL_DATABASE=web_im_chat npm run db:migrate
 ```
 
 语音和视频聊天默认关闭。如需开启，请在启动时设置：
