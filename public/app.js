@@ -10,7 +10,8 @@ const state = {
   friendResponses: [],
   socket: null,
   call: null,
-  contextFriendId: null
+  contextFriendId: null,
+  contextMessageId: null
 };
 
 const $ = selector => document.querySelector(selector);
@@ -53,6 +54,8 @@ const incomingActions = $('#incomingActions');
 const friendContextMenu = $('#friendContextMenu');
 const contextDeleteFriendBtn = $('#contextDeleteFriendBtn');
 const contextClearMessagesBtn = $('#contextClearMessagesBtn');
+const messageContextMenu = $('#messageContextMenu');
+const contextDeleteMessageBtn = $('#contextDeleteMessageBtn');
 const rtcConfig = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
@@ -487,6 +490,7 @@ function renderFriends() {
 }
 
 function showFriendContextMenu(event, friend) {
+  hideMessageContextMenu();
   state.contextFriendId = friend.id;
   friendContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
   friendContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
@@ -496,6 +500,19 @@ function showFriendContextMenu(event, friend) {
 function hideFriendContextMenu() {
   state.contextFriendId = null;
   friendContextMenu?.classList.add('hidden');
+}
+
+function showMessageContextMenu(event, message) {
+  hideFriendContextMenu();
+  state.contextMessageId = message.id;
+  messageContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 170)}px`;
+  messageContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 70)}px`;
+  messageContextMenu.classList.remove('hidden');
+}
+
+function hideMessageContextMenu() {
+  state.contextMessageId = null;
+  messageContextMenu?.classList.add('hidden');
 }
 
 contextDeleteFriendBtn.addEventListener('click', () => {
@@ -510,15 +527,28 @@ contextClearMessagesBtn.addEventListener('click', () => {
   if (friendId) clearFriendMessages(friendId);
 });
 
+contextDeleteMessageBtn.addEventListener('click', () => {
+  const messageId = state.contextMessageId;
+  hideMessageContextMenu();
+  if (messageId) deleteMessage(messageId);
+});
+
 document.addEventListener('click', event => {
   if (!friendContextMenu.contains(event.target)) hideFriendContextMenu();
+  if (!messageContextMenu.contains(event.target)) hideMessageContextMenu();
 });
 
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape') hideFriendContextMenu();
+  if (event.key === 'Escape') {
+    hideFriendContextMenu();
+    hideMessageContextMenu();
+  }
 });
 
-window.addEventListener('scroll', hideFriendContextMenu, true);
+window.addEventListener('scroll', () => {
+  hideFriendContextMenu();
+  hideMessageContextMenu();
+}, true);
 
 function resetConversation(message = '请选择好友开始聊天', status = '好友上线后可实时收发消息') {
   state.selectedFriend = null;
@@ -609,6 +639,7 @@ function updateChatHeader() {
 
 function renderMessages() {
   messagesEl.innerHTML = '';
+  hideMessageContextMenu();
   if (!state.messages.length) {
     messagesEl.innerHTML = '<div class="welcome"><h3>还没有消息</h3><p>发送一条文本或媒体消息开始聊天。</p></div>';
     return;
@@ -617,6 +648,14 @@ function renderMessages() {
     const wrap = document.createElement('div');
     const mine = message.from === state.me.id;
     wrap.className = `message ${mine ? 'mine' : ''}`;
+    if (mine) {
+      wrap.title = '右键打开更多操作';
+      wrap.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showMessageContextMenu(event, message);
+      });
+    }
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.appendChild(renderMessageBody(message));
@@ -625,18 +664,6 @@ function renderMessages() {
     const meta = document.createElement('div');
     meta.className = 'message-meta';
     meta.appendChild(time);
-    if (mine) {
-      const deleteBtn = document.createElement('button');
-      deleteBtn.type = 'button';
-      deleteBtn.textContent = '删除';
-      deleteBtn.className = 'delete-message-btn';
-      deleteBtn.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        deleteMessage(message.id, deleteBtn);
-      });
-      meta.appendChild(deleteBtn);
-    }
     wrap.append(bubble, meta);
     messagesEl.appendChild(wrap);
   });

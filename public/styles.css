@@ -527,6 +527,7 @@ input:focus {
 
 .message.mine {
   align-self: flex-end;
+  user-select: none;
 }
 
 .bubble {
@@ -556,22 +557,6 @@ input:focus {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-}
-
-.delete-message-btn {
-  padding: 0;
-  color: var(--danger);
-  font-size: 13px;
-  background: transparent;
-}
-
-.delete-message-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.delete-message-btn:hover {
-  text-decoration: underline;
 }
 
 .bubble img,
