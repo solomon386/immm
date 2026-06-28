@@ -225,6 +225,17 @@ function removeMessageFile(message) {
   }
 }
 
+function clearConversationMessages(userId, friendId) {
+  const conversationId = conversationOf(userId, friendId);
+  const removedMessages = db.messages.filter(message => message.conversationId === conversationId);
+  removedMessages.forEach(removeMessageFile);
+  db.messages = db.messages.filter(message => message.conversationId !== conversationId);
+  return {
+    conversationId,
+    removedMessageCount: removedMessages.length
+  };
+}
+
 function validateUploadedFile(file) {
   const type = uploadTypeFromMime(file.mimetype);
   if (!type || !hasAllowedExtensionForType(file.originalname, type)) {
@@ -520,10 +531,54 @@ app.post('/api/friends/respond', auth, (req, res) => {
   res.json({ message: accept ? '已添加好友' : '已拒绝请求' });
 });
 
+app.delete('/api/friends/:friendId', auth, (req, res) => {
+  const friend = db.users.find(user => user.id === req.params.friendId);
+  if (!friend) return res.status(404).json({ message: '好友不存在' });
+
+  const friendshipIndex = db.friendships.findIndex(pair => pair.includes(req.user.id) && pair.includes(friend.id));
+  if (friendshipIndex === -1) return res.status(400).json({ message: '你们当前不是好友' });
+
+  db.friendships.splice(friendshipIndex, 1);
+  db.friendRequests = db.friendRequests.filter(request =>
+    !((request.from === req.user.id && request.to === friend.id) || (request.from === friend.id && request.to === req.user.id))
+  );
+  const cleanup = clearConversationMessages(req.user.id, friend.id);
+  saveData();
+
+  const payload = {
+    userId: req.user.id,
+    friendId: friend.id,
+    conversationId: cleanup.conversationId,
+    removedMessageCount: cleanup.removedMessageCount
+  };
+  emitToUser(req.user.id, 'friend:removed', payload);
+  emitToUser(friend.id, 'friend:removed', payload);
+  res.json({ message: '好友已删除', ...payload });
+});
+
 app.get('/api/messages/:friendId', auth, (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能查看好友消息' });
   const conversationId = conversationOf(req.user.id, req.params.friendId);
   res.json(db.messages.filter(message => message.conversationId === conversationId));
+});
+
+app.delete('/api/messages/:friendId', auth, (req, res) => {
+  if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能清空好友会话' });
+  const friend = db.users.find(user => user.id === req.params.friendId);
+  if (!friend) return res.status(404).json({ message: '好友不存在' });
+
+  const cleanup = clearConversationMessages(req.user.id, friend.id);
+  saveData();
+
+  const payload = {
+    userId: req.user.id,
+    friendId: friend.id,
+    conversationId: cleanup.conversationId,
+    removedMessageCount: cleanup.removedMessageCount
+  };
+  emitToUser(req.user.id, 'conversation:cleared', payload);
+  emitToUser(friend.id, 'conversation:cleared', payload);
+  res.json({ message: '聊天记录已清空', ...payload });
 });
 
 app.post('/api/messages/:friendId/read', auth, (req, res) => {

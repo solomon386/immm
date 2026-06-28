@@ -283,6 +283,44 @@ input:focus {
   background: white;
 }
 
+.user-item {
+  user-select: none;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 170px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18);
+}
+
+.context-menu button {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+}
+
+.context-menu button:hover {
+  background: #f8fafc;
+}
+
+.context-menu .danger-item {
+  color: var(--danger);
+  font-weight: 800;
+}
+
+.context-menu .danger-item {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+}
+
 .user-meta {
   min-width: 0;
   display: grid;

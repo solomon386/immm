@@ -7,7 +7,8 @@ const state = {
   selectedFriend: null,
   messages: [],
   socket: null,
-  call: null
+  call: null,
+  contextFriendId: null
 };
 
 const $ = selector => document.querySelector(selector);
@@ -39,6 +40,9 @@ const remoteAudioAvatar = $('#remoteAudioAvatar');
 const localMediaLabel = $('#localMediaLabel');
 const remoteMediaLabel = $('#remoteMediaLabel');
 const incomingActions = $('#incomingActions');
+const friendContextMenu = $('#friendContextMenu');
+const contextDeleteFriendBtn = $('#contextDeleteFriendBtn');
+const contextClearMessagesBtn = $('#contextClearMessagesBtn');
 const rtcConfig = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
@@ -161,6 +165,8 @@ function connectSocket() {
     await loadMe();
     toast('好友状态已更新');
   });
+  state.socket.on('friend:removed', handleFriendRemoved);
+  state.socket.on('conversation:cleared', handleConversationCleared);
   state.socket.on('presence:update', ({ userId, online }) => {
     const friend = state.friends.find(item => item.id === userId);
     if (friend) friend.online = online;
@@ -321,6 +327,7 @@ async function respondRequest(requestId, accept) {
 
 function renderFriends() {
   friendList.innerHTML = '';
+  hideFriendContextMenu();
   if (!state.friends.length) {
     friendList.textContent = '暂无好友';
     friendList.classList.add('empty');
@@ -329,10 +336,114 @@ function renderFriends() {
   friendList.classList.remove('empty');
   state.friends.forEach(friend => {
     const item = userItem(friend);
+    item.title = '左键聊天，右键打开更多操作';
+    item.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      showFriendContextMenu(event, friend);
+    });
     item.classList.toggle('active', state.selectedFriend?.id === friend.id);
     item.addEventListener('click', () => selectFriend(friend));
     friendList.appendChild(item);
   });
+}
+
+function showFriendContextMenu(event, friend) {
+  state.contextFriendId = friend.id;
+  friendContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
+  friendContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
+  friendContextMenu.classList.remove('hidden');
+}
+
+function hideFriendContextMenu() {
+  state.contextFriendId = null;
+  friendContextMenu?.classList.add('hidden');
+}
+
+contextDeleteFriendBtn.addEventListener('click', () => {
+  const friendId = state.contextFriendId;
+  hideFriendContextMenu();
+  if (friendId) deleteFriend(friendId);
+});
+
+contextClearMessagesBtn.addEventListener('click', () => {
+  const friendId = state.contextFriendId;
+  hideFriendContextMenu();
+  if (friendId) clearFriendMessages(friendId);
+});
+
+document.addEventListener('click', event => {
+  if (!friendContextMenu.contains(event.target)) hideFriendContextMenu();
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') hideFriendContextMenu();
+});
+
+window.addEventListener('scroll', hideFriendContextMenu, true);
+
+function resetConversation(message = '请选择好友开始聊天', status = '好友上线后可实时收发消息') {
+  state.selectedFriend = null;
+  state.messages = [];
+  messageInput.value = '';
+  messageInput.disabled = true;
+  fileInput.disabled = true;
+  sendBtn.disabled = true;
+  voiceCallBtn.disabled = true;
+  videoCallBtn.disabled = true;
+  $('#chatTitle').textContent = message;
+  $('#chatStatus').textContent = status;
+  messagesEl.innerHTML = '<div class="welcome"><h3>请选择好友</h3><p>从左侧好友列表选择一个好友开始聊天。</p></div>';
+}
+
+async function deleteFriend(friendId) {
+  const friend = state.friends.find(item => item.id === friendId);
+  if (!friend) return;
+  if (!confirm(`确定删除好友「${friend.displayName}」吗？双方会话消息也会被清理。`)) return;
+
+  try {
+    const data = await api(`/api/friends/${friendId}`, { method: 'DELETE' });
+    toast(data.message);
+    await loadMe();
+    if (state.selectedFriend?.id === friendId) {
+      resetConversation('好友已删除', '请选择其他好友继续聊天');
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function clearFriendMessages(friendId) {
+  const friend = state.friends.find(item => item.id === friendId);
+  if (!friend) return;
+  if (!confirm(`确定清空与「${friend.displayName}」的全部聊天记录吗？此操作只会清理你们双方之间的消息。`)) return;
+
+  try {
+    const data = await api(`/api/messages/${friendId}`, { method: 'DELETE' });
+    toast(data.message);
+    if (state.selectedFriend?.id === friendId) {
+      state.messages = [];
+      renderMessages();
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function handleFriendRemoved(payload) {
+  await loadMe();
+  if ([payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
+    resetConversation('好友关系已解除', '该会话已不可用');
+  }
+  toast('好友列表已更新');
+}
+
+function handleConversationCleared(payload) {
+  if ([payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
+    state.messages = [];
+    renderMessages();
+    toast('聊天记录已清空');
+  }
 }
 
 async function selectFriend(friend) {
