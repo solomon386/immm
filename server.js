@@ -258,17 +258,24 @@ function logFilePath(date = new Date()) {
 }
 
 function serializeLogEntry(entry) {
-  return JSON.stringify({
+  return JSON.stringify(entry);
+}
+
+const SENSITIVE_LOG_KEYS = new Set(['password', 'passwordHash', 'token', 'authorization', 'cookie', 'jwt', 'secret', 'JWT_SECRET']);
+const LARGE_FIELD_KEYS = new Set(['file', 'files', 'image', 'audio', 'video', 'blob', 'buffer', 'base64', 'data', 'content']);
+
+function buildLogEntry(entry) {
+  return {
     timestamp: new Date().toISOString(),
     environment: NODE_ENV,
     ...entry
-  });
+  };
 }
 
 function writeProductionLog(entry) {
   if (IS_TEST) return;
   if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
-  fs.appendFile(logFilePath(), `${serializeLogEntry(entry)}\n`, error => {
+  fs.appendFile(logFilePath(), `${serializeLogEntry(buildLogEntry(entry))}\n`, error => {
     if (error) console.error('[logger] 写入日志失败', error.message);
   });
 }
@@ -284,8 +291,9 @@ function writeDevelopmentLog(entry) {
   if (IS_TEST) return;
   const reset = '\x1b[0m';
   const color = statusColor(entry.statusCode);
-  const user = entry.userId ? ` user=${entry.userId}` : '';
-  console.log(`${color}${entry.method} ${entry.path} ${entry.statusCode}${reset} ${entry.durationMs}ms requestId=${entry.requestId}${user}`);
+  const logEntry = buildLogEntry(entry);
+  console.log(`${color}[${logEntry.level.toUpperCase()}] ${logEntry.method} ${logEntry.path} ${logEntry.statusCode}${reset} ${logEntry.durationMs}ms`);
+  console.log(JSON.stringify(logEntry, null, 2));
 }
 
 function logWebRequest(entry) {
@@ -294,6 +302,64 @@ function logWebRequest(entry) {
     return;
   }
   writeDevelopmentLog(entry);
+}
+
+function sanitizeLogValue(value, key = '') {
+  const normalizedKey = key.toLowerCase();
+  if (SENSITIVE_LOG_KEYS.has(normalizedKey)) return '[REDACTED]';
+  if (value == null) return value;
+
+  if (typeof value === 'string') {
+    if (LARGE_FIELD_KEYS.has(normalizedKey) && value.length > 200) {
+      return `[OMITTED_LARGE_FIELD length=${value.length}]`;
+    }
+    return value.length > 1000 ? `${value.slice(0, 1000)}...[TRUNCATED length=${value.length}]` : value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map(item => sanitizeLogValue(item, key));
+  }
+
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([childKey, childValue]) => [childKey, sanitizeLogValue(childValue, childKey)])
+    );
+  }
+
+  return value;
+}
+
+function uploadedFileLog(file) {
+  if (!file) return null;
+  return {
+    originalName: file.originalname,
+    storedName: file.filename,
+    mime: file.mimetype,
+    size: file.size,
+    storagePath: file.filename ? `/uploads/${file.filename}` : null,
+    persisted: file.path ? fs.existsSync(file.path) : false
+  };
+}
+
+function buildRequestData(req) {
+  const data = {};
+  if (req.query && Object.keys(req.query).length) {
+    data.query = sanitizeLogValue(req.query);
+  }
+  if (req.body && Object.keys(req.body).length) {
+    data.body = sanitizeLogValue(req.body);
+  }
+  if (req.file) {
+    data.file = uploadedFileLog(req.file);
+  }
+  if (Array.isArray(req.files) && req.files.length) {
+    data.files = req.files.map(uploadedFileLog);
+  } else if (req.files && typeof req.files === 'object') {
+    data.files = Object.fromEntries(
+      Object.entries(req.files).map(([field, files]) => [field, files.map(uploadedFileLog)])
+    );
+  }
+  return Object.keys(data).length ? data : null;
 }
 
 function requestLogger(req, res, next) {
@@ -309,11 +375,13 @@ function requestLogger(req, res, next) {
       requestId,
       method: req.method,
       path: req.originalUrl,
+      routeType: req.originalUrl.startsWith('/api') ? 'api' : 'static',
       statusCode: res.statusCode,
       durationMs: Number(durationMs.toFixed(2)),
       ip: req.ip,
       userAgent: req.get('user-agent') || '',
-      userId: req.user?.id || null
+      userId: req.user?.id || null,
+      requestData: buildRequestData(req)
     });
   });
 
@@ -347,9 +415,9 @@ const upload = multer({
   }
 });
 
+app.use(requestLogger);
 app.use(cors());
 app.use(express.json());
-app.use('/api', requestLogger);
 app.use('/uploads', express.static(UPLOAD_DIR, {
   setHeaders: res => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -648,6 +716,7 @@ io.on('connection', socket => {
 if (process.env.NODE_ENV !== 'test') {
   server.listen(PORT, () => {
     console.log(`即时聊天系统已启动：http://localhost:${PORT}`);
+    console.log(`日志系统已启用：${IS_PRODUCTION ? `生产环境 JSON 日志 -> ${logFilePath()}` : '开发环境控制台日志'}`);
   });
 }
 

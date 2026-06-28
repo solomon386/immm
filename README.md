@@ -46,11 +46,12 @@ npm run start:prod
 
 ## 日志系统
 
-日志中间件接入在 `/api` Web 接口层，每个请求都会返回 `X-Request-Id`，便于排查问题。
+日志中间件接入在 HTTP Web 请求层，打开首页、加载静态资源和访问 `/api` 接口都会记录日志；每个请求都会返回 `X-Request-Id`，便于排查问题。
 
-- 开发环境：默认 `NODE_ENV=development`，日志以彩色简洁格式输出到控制台。
+- 开发环境：默认 `NODE_ENV=development`，终端先输出彩色摘要，再输出格式化 JSON 详情。
 - 生产环境：使用 `NODE_ENV=production`，日志以 JSON Lines 格式写入 `logs/access-YYYY-MM-DD.log`。
-- 日志字段包含 `timestamp`、`environment`、`level`、`requestId`、`method`、`path`、`statusCode`、`durationMs`、`ip`、`userAgent` 和 `userId`。
+- 日志字段包含 `timestamp`、`environment`、`level`、`requestId`、`method`、`path`、`routeType`、`statusCode`、`durationMs`、`ip`、`userAgent`、`userId` 和 `requestData`。
+- `requestData` 会记录查询参数和接口提交数据；`password`、`token` 等敏感字段会脱敏；图片、语音、视频等上传文件只记录文件名、类型、大小和 `/uploads/...` 存储路径，不记录文件内容。
 
 ## 自动化测试
 
