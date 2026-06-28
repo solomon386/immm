@@ -85,6 +85,7 @@ function publicUser(user) {
     username: user.username,
     displayName: user.displayName,
     avatarColor: user.avatarColor,
+    avatarUrl: user.avatarUrl || '',
     online: Boolean(onlineUsers.get(user.id))
   };
 }
@@ -475,6 +476,31 @@ app.get('/api/me', auth, (req, res) => {
       .filter(request => request.to === req.user.id && request.status === 'pending')
       .map(request => ({ ...request, fromUser: publicUser(db.users.find(user => user.id === request.from)) }))
   });
+});
+
+app.patch('/api/me', auth, (req, res) => {
+  const displayName = String(req.body.displayName || '').trim();
+  const avatarUrl = String(req.body.avatarUrl || '').trim();
+
+  if (!displayName) return res.status(400).json({ message: '昵称不能为空' });
+  if (displayName.length > 20) return res.status(400).json({ message: '昵称最多 20 个字符' });
+  if (avatarUrl && (!avatarUrl.startsWith('/uploads/') || !hasAllowedExtensionForType(avatarUrl, 'image'))) {
+    return res.status(400).json({ message: '头像地址不合法' });
+  }
+
+  req.user.displayName = displayName;
+  req.user.avatarUrl = avatarUrl;
+  saveData();
+
+  const user = publicUser(req.user);
+  emitToUser(req.user.id, 'profile:updated', { user });
+  db.friendships
+    .filter(pair => pair.includes(req.user.id))
+    .flat()
+    .filter(userId => userId !== req.user.id)
+    .forEach(friendId => emitToUser(friendId, 'friend:profile-updated', { user }));
+
+  res.json({ message: '个人资料已更新', user });
 });
 
 app.get('/api/users/search', auth, (req, res) => {

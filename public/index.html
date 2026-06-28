@@ -46,8 +46,26 @@
               <strong id="myName">未登录</strong>
               <p id="myUsername"></p>
             </div>
+            <button id="editProfileBtn" class="ghost" type="button">编辑</button>
             <button id="logoutBtn" class="ghost" type="button">退出</button>
           </div>
+
+          <form id="profileForm" class="profile-editor hidden">
+            <label>
+              昵称
+              <input id="profileDisplayName" maxlength="20" placeholder="请输入昵称" />
+            </label>
+            <div class="profile-avatar-field">
+              <span>头像</span>
+              <input id="profileAvatarInput" class="hidden-file-input" type="file" accept="image/*" />
+              <button id="profileAvatarButton" class="ghost" type="button">上传文件</button>
+              <small id="profileAvatarFilename">未选择文件</small>
+            </div>
+            <div class="profile-editor-actions">
+              <button class="primary" type="submit">保存</button>
+              <button id="cancelProfileBtn" class="ghost" type="button">取消</button>
+            </div>
+          </form>
 
           <div class="panel">
             <h2>添加好友</h2>

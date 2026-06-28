@@ -22,6 +22,13 @@ const authForm = $('#authForm');
 const authSubmit = $('#authSubmit');
 const authTip = $('#authTip');
 const displayNameWrap = $('#displayNameWrap');
+const editProfileBtn = $('#editProfileBtn');
+const profileForm = $('#profileForm');
+const profileDisplayName = $('#profileDisplayName');
+const profileAvatarInput = $('#profileAvatarInput');
+const profileAvatarButton = $('#profileAvatarButton');
+const profileAvatarFilename = $('#profileAvatarFilename');
+const cancelProfileBtn = $('#cancelProfileBtn');
 const friendList = $('#friendList');
 const requestList = $('#requestList');
 const searchResults = $('#searchResults');
@@ -100,8 +107,20 @@ function initials(user) {
 }
 
 function setAvatar(el, user) {
+  el.innerHTML = '';
+  if (user?.avatarUrl) {
+    const img = document.createElement('img');
+    img.src = user.avatarUrl;
+    img.alt = `${user.displayName || user.username || '用户'}的头像`;
+    img.loading = 'lazy';
+    el.appendChild(img);
+    el.style.background = '#f8fafc';
+    el.classList.add('image-avatar');
+    return;
+  }
   el.textContent = initials(user);
   el.style.background = user?.avatarColor || '#4f46e5';
+  el.classList.remove('image-avatar');
 }
 
 function showChat() {
@@ -138,6 +157,7 @@ async function loadMe() {
   $('#myName').textContent = state.me.displayName;
   $('#myUsername').textContent = `@${state.me.username}`;
   setAvatar($('#myAvatar'), state.me);
+  profileDisplayName.value = state.me.displayName;
   renderFriends();
   renderRequests();
   renderFriendResponses();
@@ -182,6 +202,22 @@ function connectSocket() {
   });
   state.socket.on('friend:removed', handleFriendRemoved);
   state.socket.on('conversation:cleared', handleConversationCleared);
+  state.socket.on('profile:updated', payload => {
+    state.me = payload.user;
+    $('#myName').textContent = state.me.displayName;
+    setAvatar($('#myAvatar'), state.me);
+    profileDisplayName.value = state.me.displayName;
+  });
+  state.socket.on('friend:profile-updated', payload => {
+    const friend = state.friends.find(item => item.id === payload.user.id);
+    if (friend) Object.assign(friend, payload.user);
+    if (state.selectedFriend?.id === payload.user.id) {
+      state.selectedFriend = { ...state.selectedFriend, ...payload.user };
+      updateChatHeader();
+    }
+    renderFriends();
+    renderMessages();
+  });
   state.socket.on('presence:update', ({ userId, online }) => {
     const friend = state.friends.find(item => item.id === userId);
     if (friend) friend.online = online;
@@ -238,6 +274,60 @@ authForm.addEventListener('submit', async event => {
 
 loginTab.addEventListener('click', () => setMode('login'));
 registerTab.addEventListener('click', () => setMode('register'));
+
+editProfileBtn.addEventListener('click', () => {
+  profileDisplayName.value = state.me?.displayName || '';
+  profileForm.classList.remove('hidden');
+});
+
+cancelProfileBtn.addEventListener('click', () => {
+  profileForm.classList.add('hidden');
+  profileAvatarInput.value = '';
+  profileAvatarFilename.textContent = '未选择文件';
+});
+
+profileAvatarButton.addEventListener('click', () => {
+  profileAvatarInput.click();
+});
+
+profileAvatarInput.addEventListener('change', () => {
+  profileAvatarFilename.textContent = profileAvatarInput.files[0]?.name || '未选择文件';
+});
+
+profileForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const displayName = profileDisplayName.value.trim();
+  if (!displayName) {
+    toast('昵称不能为空', true);
+    return;
+  }
+
+  try {
+    let avatarUrl = state.me.avatarUrl || '';
+    const avatarFile = profileAvatarInput.files[0];
+    if (avatarFile) {
+      const fd = new FormData();
+      fd.append('file', avatarFile);
+      const uploaded = await api('/api/upload', { method: 'POST', body: fd });
+      if (uploaded.type !== 'image') throw new Error('头像只能使用图片文件');
+      avatarUrl = uploaded.url;
+    }
+
+    const data = await api('/api/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ displayName, avatarUrl })
+    });
+    state.me = data.user;
+    $('#myName').textContent = state.me.displayName;
+    setAvatar($('#myAvatar'), state.me);
+    profileForm.classList.add('hidden');
+    profileAvatarInput.value = '';
+    profileAvatarFilename.textContent = '未选择文件';
+    toast(data.message);
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
 
 $('#logoutBtn').addEventListener('click', () => {
   localStorage.removeItem('token');
