@@ -6,6 +6,7 @@ const state = {
   requests: [],
   selectedFriend: null,
   messages: [],
+  unreadFriendIds: new Set(),
   friendResponses: [],
   socket: null,
   call: null,
@@ -147,13 +148,24 @@ function connectSocket() {
   state.socket = io({ auth: { token: state.token } });
 
   state.socket.on('message:new', message => {
-    if (!state.selectedFriend) return;
-    const belongs = [message.from, message.to].includes(state.selectedFriend.id);
-    if (!belongs) return;
-    if (!state.messages.some(item => item.id === message.id)) state.messages.push(message);
-    renderMessages();
-    if (message.from === state.selectedFriend.id && message.to === state.me.id) {
-      markSelectedConversationRead();
+    const friendId = message.from === state.me.id ? message.to : message.from;
+    const isCurrentConversation = state.selectedFriend?.id === friendId;
+
+    if (isCurrentConversation) {
+      if (!state.messages.some(item => item.id === message.id)) state.messages.push(message);
+      renderMessages();
+      if (message.from === state.selectedFriend.id && message.to === state.me.id) {
+        state.unreadFriendIds.delete(friendId);
+        renderFriends();
+        markSelectedConversationRead();
+      }
+      return;
+    }
+
+    if (message.to === state.me.id) {
+      state.unreadFriendIds.add(friendId);
+      renderFriends();
+      toast('收到新的好友消息');
     }
   });
 
@@ -233,6 +245,7 @@ $('#logoutBtn').addEventListener('click', () => {
   state.me = null;
   state.selectedFriend = null;
   state.messages = [];
+  state.unreadFriendIds.clear();
   endCall(false);
   if (state.socket) state.socket.disconnect();
   showAuth();
@@ -370,6 +383,7 @@ function renderFriends() {
   friendList.classList.remove('empty');
   state.friends.forEach(friend => {
     const item = userItem(friend);
+    item.classList.toggle('has-unread', state.unreadFriendIds.has(friend.id));
     item.title = '左键聊天，右键打开更多操作';
     item.addEventListener('contextmenu', event => {
       event.preventDefault();
@@ -482,6 +496,7 @@ function handleConversationCleared(payload) {
 
 async function selectFriend(friend) {
   state.selectedFriend = friend;
+  state.unreadFriendIds.delete(friend.id);
   state.messages = await api(`/api/messages/${friend.id}`);
   messageInput.disabled = false;
   fileInput.disabled = false;

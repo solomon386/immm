@@ -292,6 +292,7 @@ input:focus {
 }
 
 .user-item {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 10px;
@@ -304,6 +305,19 @@ input:focus {
 .user-item.active {
   outline: 2px solid rgba(79, 70, 229, 0.42);
   background: white;
+}
+
+.user-item.has-unread::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.14);
 }
 
 .user-item {
