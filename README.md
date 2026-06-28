@@ -45,14 +45,15 @@ http://localhost:3000
 
 项目已接入数据库持久化：
 
-- 开发环境：默认使用 SQLite，数据文件为 `dev.sqlite`。
+- 开发环境：默认使用 SQLite，数据文件为 `data.sqlite`。
 - 生产环境：默认使用 MySQL，需要提前创建数据库。
 - 测试环境：使用内存存储，不写入真实数据库。
+- 个人数据、好友请求、好友关系、消息数据分别存储在 `users`、`friend_requests`、`friendships`、`messages` 表中。
 
 开发环境可指定 SQLite 文件位置：
 
 ```bash
-SQLITE_FILE=./dev.sqlite npm start
+SQLITE_FILE=./data.sqlite npm start
 ```
 
 生产环境可使用 MySQL 环境变量：

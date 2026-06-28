@@ -45,11 +45,15 @@ if (IS_PRODUCTION && !fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive:
 
 const dataStore = await createDataStore(NODE_ENV);
 let db = await dataStore.load();
+await dataStore.save(db);
+let saveQueue = Promise.resolve();
 
 function saveData() {
-  dataStore.save(db).catch(error => {
+  const snapshot = structuredClone(db);
+  saveQueue = saveQueue.then(() => dataStore.save(snapshot)).catch(error => {
     console.error('[database] 保存数据失败', error);
   });
+  return saveQueue;
 }
 
 function setDbForTest(nextDb) {

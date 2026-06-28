@@ -1,5 +1,0 @@
-CREATE TABLE IF NOT EXISTS app_state (
-  id VARCHAR(64) PRIMARY KEY,
-  data JSON NOT NULL,
-  updated_at DATETIME NOT NULL
-);
