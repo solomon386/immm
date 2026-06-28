@@ -47,8 +47,9 @@ http://localhost:3000
 
 - 开发环境：默认使用 SQLite，数据文件为 `data.sqlite`。
 - 生产环境：默认使用 MySQL，需要提前创建数据库。
+- 聊天消息记录使用 Redis 存储，开发环境默认保留 1 分钟，生产环境默认保留 24 小时。
 - 测试环境：使用内存存储，不写入真实数据库。
-- 个人数据、好友请求、好友关系、消息数据分别存储在 `users`、`friend_requests`、`friendships`、`messages` 表中。
+- 个人数据、好友请求、好友关系分别存储在 `users`、`friend_requests`、`friendships` 表中。
 
 开发环境可指定 SQLite 文件位置：
 
@@ -67,6 +68,19 @@ NODE_ENV=production MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_P
 ```bash
 NODE_ENV=production DATABASE_URL=mysql://user:password@127.0.0.1:3306/web_im_chat npm start
 ```
+
+Redis 默认连接 `redis://127.0.0.1:6379`。可通过环境变量修改连接和消息保留时间：
+
+```bash
+REDIS_URL=redis://127.0.0.1:6379 MESSAGE_RETENTION_SECONDS=60 npm start
+```
+
+消息保存规则：
+
+- 每条聊天消息按创建时间设置 Redis 过期时间。
+- 开发环境默认 `MESSAGE_RETENTION_SECONDS=60`，即最多保存 1 分钟。
+- 生产环境默认 `MESSAGE_RETENTION_SECONDS=86400`，即最多保存 24 小时。
+- 超过保留时间后，消息记录会从 Redis 自动过期，重新进入会话时不会再加载。
 
 ## 数据库迁移
 

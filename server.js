@@ -21,6 +21,8 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = NODE_ENV === 'production';
 const IS_TEST = NODE_ENV === 'test';
 const CALLS_ENABLED = process.env.ENABLE_CALLS === 'true';
+const DEFAULT_MESSAGE_RETENTION_SECONDS = IS_PRODUCTION ? 24 * 60 * 60 : 60;
+const MESSAGE_RETENTION_MS = Number(process.env.MESSAGE_RETENTION_SECONDS || DEFAULT_MESSAGE_RETENTION_SECONDS) * 1000;
 const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 const UPLOAD_RULES = {
   image: {
@@ -45,10 +47,12 @@ if (IS_PRODUCTION && !fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive:
 
 const dataStore = await createDataStore(NODE_ENV);
 let db = await dataStore.load();
+pruneExpiredMessages();
 await dataStore.save(db);
 let saveQueue = Promise.resolve();
 
 function saveData() {
+  pruneExpiredMessages();
   const snapshot = structuredClone(db);
   saveQueue = saveQueue.then(() => dataStore.save(snapshot)).catch(error => {
     console.error('[database] 保存数据失败', error);
@@ -110,7 +114,22 @@ function conversationOf(a, b) {
   return [a, b].sort().join(':');
 }
 
+function isMessageAlive(message, now = Date.now()) {
+  const createdAtMs = Date.parse(message.createdAt);
+  return Number.isFinite(createdAtMs) && createdAtMs + MESSAGE_RETENTION_MS > now;
+}
+
+function pruneExpiredMessages() {
+  const now = Date.now();
+  const expiredMessages = db.messages.filter(message => !isMessageAlive(message, now));
+  if (!expiredMessages.length) return 0;
+  expiredMessages.forEach(removeMessageFile);
+  db.messages = db.messages.filter(message => isMessageAlive(message, now));
+  return expiredMessages.length;
+}
+
 function markConversationRead(readerId, friendId) {
+  const removedCount = pruneExpiredMessages();
   const now = new Date().toISOString();
   const conversationId = conversationOf(readerId, friendId);
   const readMessages = db.messages.filter(message =>
@@ -124,7 +143,7 @@ function markConversationRead(readerId, friendId) {
     message.readAt = now;
   });
 
-  if (readMessages.length) saveData();
+  if (readMessages.length || removedCount) saveData();
 
   return {
     conversationId,
@@ -231,6 +250,7 @@ function removeMessageFile(message) {
 }
 
 function clearConversationMessages(userId, friendId) {
+  pruneExpiredMessages();
   const conversationId = conversationOf(userId, friendId);
   const removedMessages = db.messages.filter(message => message.conversationId === conversationId);
   removedMessages.forEach(removeMessageFile);
@@ -618,6 +638,8 @@ app.delete('/api/friends/:friendId', auth, (req, res) => {
 
 app.get('/api/messages/:friendId', auth, (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能查看好友消息' });
+  const removedCount = pruneExpiredMessages();
+  if (removedCount) saveData();
   const conversationId = conversationOf(req.user.id, req.params.friendId);
   res.json(db.messages.filter(message => message.conversationId === conversationId));
 });

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import mysql from 'mysql2/promise';
+import { createClient } from 'redis';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +25,25 @@ function sortedFriendship(pair = []) {
 
 function hasModelData(data) {
   return data.users.length || data.friendRequests.length || data.friendships.length || data.messages.length;
+}
+
+function hasSqlModelData(data) {
+  return data.users.length || data.friendRequests.length || data.friendships.length;
+}
+
+function messageRetentionSeconds() {
+  if (process.env.MESSAGE_RETENTION_SECONDS) {
+    return Number(process.env.MESSAGE_RETENTION_SECONDS);
+  }
+  return process.env.NODE_ENV === 'production' ? 24 * 60 * 60 : 60;
+}
+
+function redisUrl() {
+  return process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+}
+
+function redisPrefix() {
+  return process.env.REDIS_KEY_PREFIX || 'im';
 }
 
 function loadLegacyJsonData() {
@@ -65,7 +85,126 @@ function createMemoryStore() {
   };
 }
 
-function createSqliteStore() {
+async function createRedisMessageStore() {
+  const prefix = redisPrefix();
+  const retentionSeconds = messageRetentionSeconds();
+  const retentionMs = retentionSeconds * 1000;
+  const client = createClient({ url: redisUrl() });
+  client.on('error', error => {
+    console.error('[redis] 连接或执行失败', error.message);
+  });
+  await client.connect();
+
+  const globalIndexKey = `${prefix}:messages:index`;
+  const dataKey = messageId => `${prefix}:messages:data:${messageId}`;
+  const conversationKey = conversationId => `${prefix}:messages:conversation:${conversationId}`;
+
+  async function removeMessageFromIndexes(messageId, message) {
+    await client.zRem(globalIndexKey, messageId);
+    if (message?.conversationId) {
+      await client.zRem(conversationKey(message.conversationId), messageId);
+    }
+    await client.del(dataKey(messageId));
+  }
+
+  async function cleanupExpiredIndexEntries() {
+    const minAliveScore = Date.now() - retentionMs;
+    await client.zRemRangeByScore(globalIndexKey, 0, minAliveScore);
+  }
+
+  return {
+    type: 'redis',
+    retentionSeconds,
+    async load() {
+      await cleanupExpiredIndexEntries();
+      const ids = await client.zRange(globalIndexKey, 0, -1);
+      if (!ids.length) return [];
+      const values = await client.mGet(ids.map(dataKey));
+      const messages = [];
+      const staleIds = [];
+
+      values.forEach((value, index) => {
+        if (!value) {
+          staleIds.push(ids[index]);
+          return;
+        }
+        messages.push(JSON.parse(value));
+      });
+
+      if (staleIds.length) {
+        await client.zRem(globalIndexKey, staleIds);
+      }
+      return messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    },
+    async save(nextMessages = []) {
+      await cleanupExpiredIndexEntries();
+      const now = Date.now();
+      const currentIds = await client.zRange(globalIndexKey, 0, -1);
+      const nextById = new Map(nextMessages.map(message => [message.id, message]));
+
+      for (const messageId of currentIds) {
+        if (nextById.has(messageId)) continue;
+        const raw = await client.get(dataKey(messageId));
+        await removeMessageFromIndexes(messageId, raw ? JSON.parse(raw) : null);
+      }
+
+      for (const message of nextMessages) {
+        const createdAtMs = Date.parse(message.createdAt);
+        if (!Number.isFinite(createdAtMs)) continue;
+        const expiresAtMs = createdAtMs + retentionMs;
+        if (expiresAtMs <= now) {
+          await removeMessageFromIndexes(message.id, message);
+          continue;
+        }
+
+        await client.set(dataKey(message.id), JSON.stringify(message), { PXAT: expiresAtMs });
+        await client.zAdd(globalIndexKey, [{ score: createdAtMs, value: message.id }]);
+        await client.zAdd(conversationKey(message.conversationId), [{ score: createdAtMs, value: message.id }]);
+        await client.expire(conversationKey(message.conversationId), retentionSeconds + 3600);
+      }
+    },
+    async close() {
+      await client.quit();
+    }
+  };
+}
+
+function loadLegacySqliteMessages(db) {
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages'").get();
+  if (!table) return [];
+  return db.prepare('SELECT * FROM messages ORDER BY created_at ASC').all().map(row => ({
+    id: row.id,
+    conversationId: row.conversation_id,
+    from: row.from_user_id,
+    to: row.to_user_id,
+    type: row.type,
+    text: row.text || '',
+    file: row.file_json ? JSON.parse(row.file_json) : null,
+    createdAt: row.created_at,
+    readAt: row.read_at || null,
+    editedAt: row.updated_at !== row.created_at ? row.updated_at : undefined
+  }));
+}
+
+async function loadLegacyMysqlMessages(pool) {
+  const [tables] = await pool.execute("SHOW TABLES LIKE 'messages'");
+  if (!tables.length) return [];
+  const [messages] = await pool.execute('SELECT * FROM messages ORDER BY created_at ASC');
+  return messages.map(row => ({
+    id: row.id,
+    conversationId: row.conversation_id,
+    from: row.from_user_id,
+    to: row.to_user_id,
+    type: row.type,
+    text: row.text || '',
+    file: typeof row.file_json === 'string' ? JSON.parse(row.file_json) : row.file_json || null,
+    createdAt: row.created_at,
+    readAt: row.read_at || null,
+    editedAt: row.updated_at && row.updated_at !== row.created_at ? row.updated_at : undefined
+  }));
+}
+
+function createSqliteStore(messageStore) {
   const sqliteFile = process.env.SQLITE_FILE || path.join(__dirname, 'data.sqlite');
   const sqliteDir = path.dirname(sqliteFile);
   if (!fs.existsSync(sqliteDir)) fs.mkdirSync(sqliteDir, { recursive: true });
@@ -98,32 +237,17 @@ function createSqliteStore() {
       PRIMARY KEY (user_a_id, user_b_id)
     );
 
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      from_user_id TEXT NOT NULL,
-      to_user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      text TEXT NOT NULL DEFAULT '',
-      file_json TEXT,
-      created_at TEXT NOT NULL,
-      read_at TEXT,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user_id, status);
   `);
 
   const selectUsers = db.prepare('SELECT * FROM users ORDER BY created_at ASC');
   const selectRequests = db.prepare('SELECT * FROM friend_requests ORDER BY created_at ASC');
   const selectFriendships = db.prepare('SELECT * FROM friendships ORDER BY created_at ASC');
-  const selectMessages = db.prepare('SELECT * FROM messages ORDER BY created_at ASC');
   const selectLegacyState = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state'");
 
   const replaceAll = db.transaction(nextData => {
     const data = normalizeData(nextData);
-    db.exec('DELETE FROM messages; DELETE FROM friendships; DELETE FROM friend_requests; DELETE FROM users;');
+    db.exec('DELETE FROM friendships; DELETE FROM friend_requests; DELETE FROM users;');
 
     const insertUser = db.prepare(`
       INSERT INTO users (id, username, display_name, password_hash, avatar_color, avatar_url, created_at)
@@ -153,23 +277,16 @@ function createSqliteStore() {
       insertFriendship.run(userA, userB, new Date().toISOString());
     });
 
-    const insertMessage = db.prepare(`
-      INSERT INTO messages (id, conversation_id, from_user_id, to_user_id, type, text, file_json, created_at, read_at, updated_at)
-      VALUES (@id, @conversationId, @from, @to, @type, @text, @fileJson, @createdAt, @readAt, @updatedAt)
-    `);
-    data.messages.forEach(message => insertMessage.run({
-      ...message,
-      text: message.text || '',
-      fileJson: message.file ? JSON.stringify(message.file) : null,
-      readAt: message.readAt || null,
-      updatedAt: message.editedAt || message.createdAt || new Date().toISOString()
-    }));
   });
 
   return {
     type: 'sqlite',
     file: sqliteFile,
     async load() {
+      let messages = await messageStore.load();
+      if (!messages.length) {
+        messages = loadLegacySqliteMessages(db);
+      }
       const data = normalizeData({
         users: selectUsers.all().map(row => ({
           id: row.id,
@@ -189,18 +306,7 @@ function createSqliteStore() {
           updatedAt: row.updated_at || undefined
         })),
         friendships: selectFriendships.all().map(row => [row.user_a_id, row.user_b_id]),
-        messages: selectMessages.all().map(row => ({
-          id: row.id,
-          conversationId: row.conversation_id,
-          from: row.from_user_id,
-          to: row.to_user_id,
-          type: row.type,
-          text: row.text || '',
-          file: row.file_json ? JSON.parse(row.file_json) : null,
-          createdAt: row.created_at,
-          readAt: row.read_at || null,
-          editedAt: row.updated_at !== row.created_at ? row.updated_at : undefined
-        }))
+        messages
       });
       if (hasModelData(data)) return data;
       if (selectLegacyState.get()) {
@@ -210,15 +316,18 @@ function createSqliteStore() {
       return loadLegacyJsonData();
     },
     async save(nextData) {
-      replaceAll(nextData);
+      const data = normalizeData(nextData);
+      replaceAll(data);
+      await messageStore.save(data.messages);
     },
     async close() {
       db.close();
+      await messageStore.close();
     }
   };
 }
 
-async function createMysqlStore() {
+async function createMysqlStore(messageStore) {
   const config = mysqlConfigFromEnv();
   const pool = config.uri ? mysql.createPool(config.uri) : mysql.createPool(config);
 
@@ -252,21 +361,6 @@ async function createMysqlStore() {
       PRIMARY KEY (user_a_id, user_b_id)
     )
   `);
-  await pool.execute(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id VARCHAR(64) PRIMARY KEY,
-      conversation_id VARCHAR(191) NOT NULL,
-      from_user_id VARCHAR(64) NOT NULL,
-      to_user_id VARCHAR(64) NOT NULL,
-      type VARCHAR(32) NOT NULL,
-      text TEXT,
-      file_json JSON NULL,
-      created_at VARCHAR(32) NOT NULL,
-      read_at VARCHAR(32) NULL,
-      updated_at VARCHAR(32) NOT NULL,
-      INDEX idx_messages_conversation (conversation_id, created_at)
-    )
-  `);
 
   return {
     type: 'mysql',
@@ -274,7 +368,10 @@ async function createMysqlStore() {
       const [users] = await pool.execute('SELECT * FROM users ORDER BY created_at ASC');
       const [requests] = await pool.execute('SELECT * FROM friend_requests ORDER BY created_at ASC');
       const [friendships] = await pool.execute('SELECT * FROM friendships ORDER BY created_at ASC');
-      const [messages] = await pool.execute('SELECT * FROM messages ORDER BY created_at ASC');
+      let messages = await messageStore.load();
+      if (!messages.length) {
+        messages = await loadLegacyMysqlMessages(pool);
+      }
       const data = normalizeData({
         users: users.map(row => ({
           id: row.id,
@@ -294,18 +391,7 @@ async function createMysqlStore() {
           updatedAt: row.updated_at || undefined
         })),
         friendships: friendships.map(row => [row.user_a_id, row.user_b_id]),
-        messages: messages.map(row => ({
-          id: row.id,
-          conversationId: row.conversation_id,
-          from: row.from_user_id,
-          to: row.to_user_id,
-          type: row.type,
-          text: row.text || '',
-          file: typeof row.file_json === 'string' ? JSON.parse(row.file_json) : row.file_json || null,
-          createdAt: row.created_at,
-          readAt: row.read_at || null,
-          editedAt: row.updated_at && row.updated_at !== row.created_at ? row.updated_at : undefined
-        }))
+        messages
       });
       if (hasModelData(data)) return data;
       const [legacyTables] = await pool.execute("SHOW TABLES LIKE 'app_state'");
@@ -323,7 +409,6 @@ async function createMysqlStore() {
       const connection = await pool.getConnection();
       try {
         await connection.beginTransaction();
-        await connection.query('DELETE FROM messages');
         await connection.query('DELETE FROM friendships');
         await connection.query('DELETE FROM friend_requests');
         await connection.query('DELETE FROM users');
@@ -365,24 +450,6 @@ async function createMysqlStore() {
           `, [userA, userB, new Date().toISOString()]);
         }
 
-        for (const message of data.messages) {
-          await connection.execute(`
-            INSERT INTO messages (id, conversation_id, from_user_id, to_user_id, type, text, file_json, created_at, read_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [
-            message.id,
-            message.conversationId,
-            message.from,
-            message.to,
-            message.type,
-            message.text || '',
-            message.file ? JSON.stringify(message.file) : null,
-            message.createdAt,
-            message.readAt || null,
-            message.editedAt || message.createdAt || new Date().toISOString()
-          ]);
-        }
-
         await connection.commit();
       } catch (error) {
         await connection.rollback();
@@ -390,15 +457,18 @@ async function createMysqlStore() {
       } finally {
         connection.release();
       }
+      await messageStore.save(data.messages);
     },
     async close() {
       await pool.end();
+      await messageStore.close();
     }
   };
 }
 
 export async function createDataStore(nodeEnv = process.env.NODE_ENV || 'development') {
   if (nodeEnv === 'test') return createMemoryStore();
-  if (nodeEnv === 'production') return createMysqlStore();
-  return createSqliteStore();
+  const messageStore = await createRedisMessageStore();
+  if (nodeEnv === 'production') return createMysqlStore(messageStore);
+  return createSqliteStore(messageStore);
 }

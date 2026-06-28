@@ -24,18 +24,4 @@ CREATE TABLE IF NOT EXISTS friendships (
   PRIMARY KEY (user_a_id, user_b_id)
 );
 
-CREATE TABLE IF NOT EXISTS messages (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  from_user_id TEXT NOT NULL,
-  to_user_id TEXT NOT NULL,
-  type TEXT NOT NULL,
-  text TEXT NOT NULL DEFAULT '',
-  file_json TEXT,
-  created_at TEXT NOT NULL,
-  read_at TEXT,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user_id, status);
