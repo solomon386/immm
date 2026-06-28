@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web 即时聊天系统</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section id="authView" class="auth-card">
+        <div>
+          <p class="eyebrow">IM Chat</p>
+          <h1>Web 即时聊天系统</h1>
+          <p class="subtitle">注册登录、好友管理、文本/图片/语音/视频实时聊天。</p>
+        </div>
+
+        <div class="tabs">
+          <button id="loginTab" class="active" type="button">登录</button>
+          <button id="registerTab" type="button">注册</button>
+        </div>
+
+        <form id="authForm" class="form">
+          <label>
+            用户名
+            <input id="username" autocomplete="username" required placeholder="请输入用户名" />
+          </label>
+          <label id="displayNameWrap" class="hidden">
+            昵称
+            <input id="displayName" placeholder="可选" />
+          </label>
+          <label>
+            密码
+            <input id="password" type="password" autocomplete="current-password" required minlength="6" placeholder="至少 6 位" />
+          </label>
+          <button id="authSubmit" class="primary" type="submit">登录</button>
+          <p id="authTip" class="tip"></p>
+        </form>
+      </section>
+
+      <section id="chatView" class="chat-shell hidden">
+        <aside class="sidebar">
+          <div class="profile">
+            <div id="myAvatar" class="avatar">我</div>
+            <div>
+              <strong id="myName">未登录</strong>
+              <p id="myUsername"></p>
+            </div>
+            <button id="logoutBtn" class="ghost" type="button">退出</button>
+          </div>
+
+          <div class="panel">
+            <h2>添加好友</h2>
+            <div class="search-row">
+              <input id="searchInput" placeholder="搜索用户名或昵称" />
+              <button id="searchBtn" type="button">搜索</button>
+            </div>
+            <div id="searchResults" class="list compact"></div>
+          </div>
+
+          <div class="panel">
+            <h2>好友请求</h2>
+            <div id="requestList" class="list compact empty">暂无好友请求</div>
+          </div>
+
+          <div class="panel friends-panel">
+            <h2>好友列表</h2>
+            <div id="friendList" class="list empty">暂无好友</div>
+          </div>
+        </aside>
+
+        <section class="conversation">
+          <header class="conversation-header">
+            <div>
+              <h2 id="chatTitle">请选择好友开始聊天</h2>
+              <p id="chatStatus">好友上线后可实时收发消息</p>
+            </div>
+            <div class="call-actions">
+              <button id="voiceCallBtn" class="call-btn voice" type="button" disabled>语音通话</button>
+              <button id="videoCallBtn" class="call-btn" type="button" disabled>视频通话</button>
+            </div>
+          </header>
+
+          <div id="messages" class="messages">
+            <div class="welcome">
+              <h3>功能说明</h3>
+              <p>先注册两个账号，互相添加好友并同意请求，即可进行实时聊天。</p>
+              <p>图片、语音、视频通过文件上传发送，聊天记录会保存在本地 `data.json`。</p>
+            </div>
+          </div>
+
+          <form id="messageForm" class="composer">
+            <input id="messageInput" placeholder="输入文本消息..." disabled />
+            <label class="file-btn">
+              媒体
+              <input id="fileInput" type="file" accept="image/*,audio/*,video/*" hidden disabled />
+            </label>
+            <button id="sendBtn" class="primary" type="submit" disabled>发送</button>
+          </form>
+        </section>
+      </section>
+
+      <section id="callOverlay" class="call-overlay hidden">
+        <div id="callCard" class="call-card">
+          <div class="call-head">
+            <div>
+              <h2 id="callTitle">视频通话</h2>
+              <p id="callStatus">正在准备通话...</p>
+            </div>
+            <button id="closeCallBtn" class="ghost danger" type="button">挂断</button>
+          </div>
+
+          <div class="video-grid">
+            <div class="video-box remote">
+              <div id="remoteAudioAvatar" class="audio-avatar hidden">语音通话中</div>
+              <video id="remoteVideo" autoplay playsinline></video>
+              <span id="remoteMediaLabel">对方画面</span>
+            </div>
+            <div class="video-box local">
+              <div id="localAudioAvatar" class="audio-avatar small hidden">麦克风已开启</div>
+              <video id="localVideo" autoplay playsinline muted></video>
+              <span id="localMediaLabel">我的画面</span>
+            </div>
+          </div>
+
+          <div id="incomingActions" class="incoming-actions hidden">
+            <button id="acceptCallBtn" class="primary" type="button">接听</button>
+            <button id="rejectCallBtn" class="ghost danger" type="button">拒绝</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <template id="userItemTpl">
+      <div class="user-item">
+        <div class="avatar small"></div>
+        <div class="user-meta">
+          <strong></strong>
+          <span></span>
+        </div>
+        <div class="actions"></div>
+      </div>
+    </template>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "web-im-chat",
+  "version": "1.0.0",
+  "description": "Web 版本即时聊天系统，支持注册登录、好友、文本、图片、语音和视频聊天消息。",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "start:prod": "NODE_ENV=production node server.js",
+    "test": "NODE_ENV=test node --test"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.5",
+    "uuid": "^9.0.1"
+  }
+}
