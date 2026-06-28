@@ -263,6 +263,29 @@ input:focus {
   margin-top: 10px;
 }
 
+.response-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.response-item {
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  background: #f8fafc;
+}
+
+.response-item.accepted {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.response-item.rejected {
+  color: var(--danger);
+  background: #fee2e2;
+}
+
 .empty {
   color: var(--muted);
   font-size: 14px;

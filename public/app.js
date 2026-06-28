@@ -6,6 +6,7 @@ const state = {
   requests: [],
   selectedFriend: null,
   messages: [],
+  friendResponses: [],
   socket: null,
   call: null,
   contextFriendId: null
@@ -23,6 +24,7 @@ const displayNameWrap = $('#displayNameWrap');
 const friendList = $('#friendList');
 const requestList = $('#requestList');
 const searchResults = $('#searchResults');
+const friendResponseList = $('#friendResponseList');
 const messagesEl = $('#messages');
 const messageInput = $('#messageInput');
 const fileInput = $('#fileInput');
@@ -137,6 +139,7 @@ async function loadMe() {
   setAvatar($('#myAvatar'), state.me);
   renderFriends();
   renderRequests();
+  renderFriendResponses();
 }
 
 function connectSocket() {
@@ -161,9 +164,9 @@ function connectSocket() {
     await loadMe();
     toast('收到新的好友请求');
   });
-  state.socket.on('friend:updated', async () => {
+  state.socket.on('friend:updated', async payload => {
     await loadMe();
-    toast('好友状态已更新');
+    handleFriendResponse(payload);
   });
   state.socket.on('friend:removed', handleFriendRemoved);
   state.socket.on('conversation:cleared', handleConversationCleared);
@@ -310,6 +313,37 @@ function renderRequests() {
     actions.append(accept, reject);
     requestList.appendChild(item);
   });
+}
+
+function renderFriendResponses() {
+  friendResponseList.innerHTML = '';
+  if (!state.friendResponses.length) {
+    friendResponseList.textContent = '暂无处理结果';
+    friendResponseList.classList.add('empty');
+    return;
+  }
+  friendResponseList.classList.remove('empty');
+  state.friendResponses.forEach(response => {
+    const item = document.createElement('div');
+    item.className = `response-item ${response.accepted ? 'accepted' : 'rejected'}`;
+    item.textContent = `${response.message} · ${new Date(response.createdAt).toLocaleTimeString()}`;
+    friendResponseList.appendChild(item);
+  });
+}
+
+function handleFriendResponse(payload) {
+  const message = payload?.message || (payload?.accepted ? '好友请求已通过' : '好友请求已被拒绝');
+  const response = {
+    requestId: payload?.requestId || `${Date.now()}`,
+    accepted: Boolean(payload?.accepted),
+    role: payload?.role,
+    message,
+    createdAt: new Date().toISOString()
+  };
+  state.friendResponses = [response, ...state.friendResponses.filter(item => item.requestId !== response.requestId)].slice(0, 5);
+  renderFriendResponses();
+  renderFriends();
+  toast(message, !response.accepted && response.role === 'requester');
 }
 
 async function respondRequest(requestId, accept) {

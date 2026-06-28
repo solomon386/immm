@@ -526,8 +526,30 @@ app.post('/api/friends/respond', auth, (req, res) => {
     db.friendships.push([request.from, request.to]);
   }
   saveData();
-  emitToUser(request.from, 'friend:updated', { accepted: accept, user: publicUser(req.user) });
-  emitToUser(request.to, 'friend:updated', { accepted: accept, user: publicUser(db.users.find(user => user.id === request.from)) });
+  const requester = db.users.find(user => user.id === request.from);
+  const responder = req.user;
+  emitToUser(request.from, 'friend:updated', {
+    requestId: request.id,
+    accepted: accept,
+    role: 'requester',
+    requester: publicUser(requester),
+    responder: publicUser(responder),
+    user: publicUser(responder),
+    message: accept
+      ? `${responder.displayName} 已同意你的好友请求`
+      : `${responder.displayName} 已拒绝你的好友请求`
+  });
+  emitToUser(request.to, 'friend:updated', {
+    requestId: request.id,
+    accepted: accept,
+    role: 'responder',
+    requester: publicUser(requester),
+    responder: publicUser(responder),
+    user: publicUser(requester),
+    message: accept
+      ? `已同意 ${requester.displayName} 的好友请求`
+      : `已拒绝 ${requester.displayName} 的好友请求`
+  });
   res.json({ message: accept ? '已添加好友' : '已拒绝请求' });
 });
 
