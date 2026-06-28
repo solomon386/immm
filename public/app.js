@@ -656,6 +656,11 @@ function renderMessages() {
         showMessageContextMenu(event, message);
       });
     }
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar message-avatar';
+    setAvatar(avatar, mine ? state.me : state.selectedFriend);
+    const content = document.createElement('div');
+    content.className = 'message-content';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
     bubble.appendChild(renderMessageBody(message));
@@ -664,7 +669,8 @@ function renderMessages() {
     const meta = document.createElement('div');
     meta.className = 'message-meta';
     meta.appendChild(time);
-    wrap.append(bubble, meta);
+    content.append(bubble, meta);
+    wrap.append(avatar, content);
     messagesEl.appendChild(wrap);
   });
   messagesEl.scrollTop = messagesEl.scrollHeight;

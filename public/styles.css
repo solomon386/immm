@@ -521,13 +521,28 @@ input:focus {
 
 .message {
   max-width: min(520px, 78%);
-  display: grid;
-  gap: 6px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
 }
 
 .message.mine {
   align-self: flex-end;
+  flex-direction: row-reverse;
   user-select: none;
+}
+
+.message-content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.message-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  font-size: 13px;
 }
 
 .bubble {
