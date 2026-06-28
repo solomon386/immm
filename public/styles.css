@@ -419,6 +419,12 @@ input:focus {
   background: #f8fafc;
 }
 
+.context-menu button:disabled {
+  cursor: not-allowed;
+  color: var(--muted);
+  opacity: 0.5;
+}
+
 .context-menu .danger-item {
   color: var(--danger);
   font-weight: 800;

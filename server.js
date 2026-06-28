@@ -768,6 +768,55 @@ io.on('connection', socket => {
     }
   });
 
+  socket.on('message:edit', (payload, ack) => {
+    const reply = response => {
+      if (typeof ack === 'function') ack(response);
+    };
+    const { messageId, text } = payload || {};
+    const message = db.messages.find(item => item.id === messageId);
+    if (!message) {
+      const error = { ok: false, message: '消息不存在或已被删除' };
+      socket.emit('message:error', { message: error.message });
+      reply(error);
+      return;
+    }
+    if (message.from !== socket.user.id) {
+      const error = { ok: false, message: '只能编辑自己发送的消息' };
+      socket.emit('message:error', { message: error.message });
+      reply(error);
+      return;
+    }
+    if (message.type !== 'text') {
+      const error = { ok: false, message: '只能编辑文本消息' };
+      socket.emit('message:error', { message: error.message });
+      reply(error);
+      return;
+    }
+    const nextText = String(text || '').trim();
+    if (!nextText) {
+      const error = { ok: false, message: '消息内容不能为空' };
+      socket.emit('message:error', { message: error.message });
+      reply(error);
+      return;
+    }
+
+    message.text = nextText;
+    message.editedAt = new Date().toISOString();
+    saveData();
+
+    const payloadToEmit = {
+      ok: true,
+      message,
+      messageId: message.id,
+      conversationId: message.conversationId,
+      from: message.from,
+      to: message.to
+    };
+    emitToUser(message.from, 'message:edited', payloadToEmit);
+    emitToUser(message.to, 'message:edited', payloadToEmit);
+    reply(payloadToEmit);
+  });
+
   socket.on('call:invite', payload => {
     const { to } = payload || {};
     if (!onlineUsers.get(to)) {

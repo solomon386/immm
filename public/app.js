@@ -11,7 +11,8 @@ const state = {
   socket: null,
   call: null,
   contextFriendId: null,
-  contextMessageId: null
+  contextMessageId: null,
+  editingMessageId: null
 };
 
 const $ = selector => document.querySelector(selector);
@@ -56,6 +57,7 @@ const contextDeleteFriendBtn = $('#contextDeleteFriendBtn');
 const contextClearMessagesBtn = $('#contextClearMessagesBtn');
 const messageContextMenu = $('#messageContextMenu');
 const contextDeleteMessageBtn = $('#contextDeleteMessageBtn');
+const contextEditMessageBtn = $('#contextEditMessageBtn');
 const rtcConfig = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
@@ -194,6 +196,7 @@ function connectSocket() {
 
   state.socket.on('message:read', handleReadReceipt);
   state.socket.on('message:deleted', handleMessageDeleted);
+  state.socket.on('message:edited', handleMessageEdited);
   state.socket.on('message:error', payload => toast(payload.message, true));
   state.socket.on('friend:request', async () => {
     await loadMe();
@@ -339,6 +342,7 @@ $('#logoutBtn').addEventListener('click', () => {
   state.selectedFriend = null;
   state.messages = [];
   state.unreadFriendIds.clear();
+  resetMessageEditor();
   endCall(false);
   if (state.socket) state.socket.disconnect();
   showAuth();
@@ -505,8 +509,10 @@ function hideFriendContextMenu() {
 function showMessageContextMenu(event, message) {
   hideFriendContextMenu();
   state.contextMessageId = message.id;
+  contextEditMessageBtn.disabled = message.type !== 'text';
+  contextEditMessageBtn.title = message.type === 'text' ? '' : '只能编辑文本消息';
   messageContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 170)}px`;
-  messageContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 70)}px`;
+  messageContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
   messageContextMenu.classList.remove('hidden');
 }
 
@@ -533,6 +539,12 @@ contextDeleteMessageBtn.addEventListener('click', () => {
   if (messageId) deleteMessage(messageId);
 });
 
+contextEditMessageBtn.addEventListener('click', () => {
+  const messageId = state.contextMessageId;
+  hideMessageContextMenu();
+  if (messageId) startEditMessage(messageId);
+});
+
 document.addEventListener('click', event => {
   if (!friendContextMenu.contains(event.target)) hideFriendContextMenu();
   if (!messageContextMenu.contains(event.target)) hideMessageContextMenu();
@@ -542,6 +554,11 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     hideFriendContextMenu();
     hideMessageContextMenu();
+    if (state.editingMessageId) {
+      messageInput.value = '';
+      resetMessageEditor();
+      toast('已取消编辑');
+    }
   }
 });
 
@@ -553,6 +570,7 @@ window.addEventListener('scroll', () => {
 function resetConversation(message = '请选择好友开始聊天', status = '好友上线后可实时收发消息') {
   state.selectedFriend = null;
   state.messages = [];
+  resetMessageEditor();
   messageInput.value = '';
   messageInput.disabled = true;
   fileInput.disabled = true;
@@ -609,12 +627,14 @@ async function handleFriendRemoved(payload) {
 function handleConversationCleared(payload) {
   if ([payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
     state.messages = [];
+    resetMessageEditor();
     renderMessages();
     toast('聊天记录已清空');
   }
 }
 
 async function selectFriend(friend) {
+  resetMessageEditor();
   state.selectedFriend = friend;
   state.unreadFriendIds.delete(friend.id);
   state.messages = await api(`/api/messages/${friend.id}`);
@@ -678,9 +698,10 @@ function renderMessages() {
 
 function messageMetaText(message, mine) {
   const sentAt = new Date(message.createdAt).toLocaleString();
-  if (!mine) return sentAt;
-  if (!message.readAt) return `${sentAt} · 未读`;
-  return `${sentAt} · 已读 ${new Date(message.readAt).toLocaleTimeString()}`;
+  const edited = message.editedAt ? ' · 已编辑' : '';
+  if (!mine) return `${sentAt}${edited}`;
+  if (!message.readAt) return `${sentAt}${edited} · 未读`;
+  return `${sentAt}${edited} · 已读`;
 }
 
 function handleReadReceipt(receipt) {
@@ -700,6 +721,61 @@ function handleMessageDeleted(payload) {
   const before = state.messages.length;
   state.messages = state.messages.filter(message => message.id !== payload.messageId);
   if (state.messages.length !== before) renderMessages();
+  if (state.editingMessageId === payload.messageId) resetMessageEditor();
+}
+
+async function handleMessageEdited(payload) {
+  const editedMessage = payload?.message;
+  if (!editedMessage) return;
+  const friendId = editedMessage.from === state.me.id ? editedMessage.to : editedMessage.from;
+  const isCurrentConversation = state.selectedFriend?.id === friendId;
+
+  if (!isCurrentConversation) {
+    if (editedMessage.to === state.me.id) {
+      state.unreadFriendIds.add(friendId);
+      renderFriends();
+      toast('好友更新了一条消息');
+    }
+    return;
+  }
+
+  const index = state.messages.findIndex(message => message.id === editedMessage.id);
+  if (index !== -1) {
+    state.messages[index] = editedMessage;
+    renderMessages();
+    return;
+  }
+
+  try {
+    state.messages = await api(`/api/messages/${friendId}`);
+    renderMessages();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function startEditMessage(messageId) {
+  const message = state.messages.find(item => item.id === messageId);
+  if (!message) {
+    toast('消息不存在或已被删除', true);
+    return;
+  }
+  if (message.from !== state.me.id || message.type !== 'text') {
+    toast('只能编辑自己发送的文本消息', true);
+    return;
+  }
+  state.editingMessageId = message.id;
+  messageInput.value = message.text;
+  messageInput.focus();
+  sendBtn.textContent = '保存编辑';
+  fileInput.disabled = true;
+  toast('正在编辑消息，修改后点击保存编辑');
+}
+
+function resetMessageEditor() {
+  state.editingMessageId = null;
+  sendBtn.textContent = '发送';
+  fileInput.disabled = !state.selectedFriend;
 }
 
 function deleteMessage(messageId, button) {
@@ -792,12 +868,37 @@ $('#messageForm').addEventListener('submit', event => {
 function sendText() {
   const text = messageInput.value.trim();
   if (!text || !state.selectedFriend) return;
+  if (state.editingMessageId) {
+    editMessage(state.editingMessageId, text);
+    return;
+  }
   state.socket.emit('message:send', {
     to: state.selectedFriend.id,
     type: 'text',
     text
   });
   messageInput.value = '';
+}
+
+function editMessage(messageId, text) {
+  if (!state.socket?.connected) {
+    toast('当前未连接服务器，无法编辑消息', true);
+    return;
+  }
+  state.socket.timeout(5000).emit('message:edit', { messageId, text }, (error, response) => {
+    if (error) {
+      toast('编辑消息超时，请检查连接后重试', true);
+      return;
+    }
+    if (!response?.ok) {
+      toast(response?.message || '编辑消息失败', true);
+      return;
+    }
+    handleMessageEdited(response);
+    messageInput.value = '';
+    resetMessageEditor();
+    toast('消息已更新');
+  });
 }
 
 voiceCallBtn.addEventListener('click', startVoiceCall);
