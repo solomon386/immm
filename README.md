@@ -127,6 +127,15 @@ ENABLE_CALLS=true npm start
 npm run start:prod
 ```
 
+## Nginx 反向代理
+
+项目已提供开发环境和生产环境的 Nginx 反向代理配置：
+
+- `nginx/development.conf`：开发环境，监听 `8080`，代理到 `127.0.0.1:3000`。
+- `nginx/production.conf`：生产环境，监听 `80`，代理到 `127.0.0.1:3000`。
+
+配置包含 Socket.IO WebSocket 升级代理，实时聊天和在线状态需要保留 `/socket.io/` 配置。详细使用方式见 `nginx/README.md`。
+
 ## 日志系统
 
 日志中间件接入在 HTTP Web 请求层，打开首页、加载静态资源和访问 `/api` 接口都会记录日志；每个请求都会返回 `X-Request-Id`，便于排查问题。
