@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: web-im-chat-app:${APP_ENV:-production}
     container_name: web-im-chat-app
     restart: unless-stopped
     command: ["pm2-runtime", "ecosystem.config.cjs", "--env", "${APP_ENV:-production}"]
@@ -35,6 +36,38 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - web_im_chat
+
+  media-cleanup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: web-im-chat-app:${APP_ENV:-production}
+    container_name: web-im-chat-media-cleanup
+    restart: unless-stopped
+    command: ["node", "scripts/media-cleanup-scheduler.js"]
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      NODE_ENV: ${APP_ENV:-production}
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-web_im}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-web_im_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-web_im_chat}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-im}
+      MESSAGE_RETENTION_SECONDS: ${MESSAGE_RETENTION_SECONDS:-}
+      MEDIA_CLEANUP_CRON: "${MEDIA_CLEANUP_CRON:-*/1 * * * *}"
+      MEDIA_CLEANUP_RUN_ON_START: ${MEDIA_CLEANUP_RUN_ON_START:-true}
+    volumes:
+      - app_uploads:/app/uploads
+      - app_logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - web_im_chat
 

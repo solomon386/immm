@@ -7,12 +7,14 @@
 - MySQL 8.4
 - Redis 7
 - Nginx 反向代理
+- media-cleanup 定时清理服务
 
 ## 文件说明
 
 - `Dockerfile`：构建 Node.js 应用镜像，并通过 `pm2-runtime` 启动。
 - `ecosystem.config.cjs`：PM2 进程配置。
-- `docker-compose.yml`：编排 app、mysql、redis、nginx。
+- `docker-compose.yml`：编排 app、media-cleanup、mysql、redis、nginx。
+- `scripts/media-cleanup-scheduler.js`：使用 `node-schedule` 定时清理过期媒体文件。
 - `nginx/docker.conf.template`：容器环境使用的 Nginx 反向代理模板，由环境变量生成实际配置。
 - `.env.docker.development.example`：开发环境变量示例。
 - `.env.docker.production.example`：生产环境变量示例。
@@ -77,6 +79,7 @@ http://localhost:8080
 容器内服务连接如下：
 
 - Node.js app：`app:3000`
+- 定时清理：`media-cleanup`
 - MySQL：`mysql:3306`
 - Redis：`redis:6379`
 - Nginx：对外暴露 `${NGINX_HTTP_PORT:-80}`
@@ -135,12 +138,18 @@ MESSAGE_RETENTION_SECONDS=60
 MESSAGE_RETENTION_SECONDS=86400
 ```
 
-即聊天消息最多保存 24 小时。
+生产环境聊天消息最多保存 24 小时。非文本消息过期后，`media-cleanup` 服务会使用 `node-schedule` 清理对应的图片、音频、视频文件。
+
+媒体文件清理 Cron：
+
+```text
+MEDIA_CLEANUP_CRON="*/1 * * * *"
+```
 
 如需调整：
 
 ```bash
-MESSAGE_RETENTION_SECONDS=3600 docker compose up -d
+MESSAGE_RETENTION_SECONDS=3600 MEDIA_CLEANUP_CRON="*/5 * * * *" docker compose up -d
 ```
 
 ## 数据持久化

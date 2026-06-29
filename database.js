@@ -46,6 +46,16 @@ function redisPrefix() {
   return process.env.REDIS_KEY_PREFIX || 'im';
 }
 
+function removeMediaFileByUrl(url) {
+  if (!url?.startsWith('/uploads/')) return false;
+  const uploadsDir = path.join(__dirname, 'uploads');
+  const filename = path.basename(url);
+  const filePath = path.join(uploadsDir, filename);
+  if (!filePath.startsWith(uploadsDir) || !fs.existsSync(filePath)) return false;
+  fs.unlinkSync(filePath);
+  return true;
+}
+
 function loadLegacyJsonData() {
   const legacyFile = path.join(__dirname, 'data.json');
   if (!fs.existsSync(legacyFile)) return structuredClone(defaultData);
@@ -81,6 +91,9 @@ function createMemoryStore() {
     async save(nextData) {
       data = normalizeData(nextData);
     },
+    async cleanupExpiredMediaFiles() {
+      return { checked: 0, deleted: 0 };
+    },
     async close() {}
   };
 }
@@ -96,11 +109,26 @@ async function createRedisMessageStore() {
   await client.connect();
 
   const globalIndexKey = `${prefix}:messages:index`;
+  const mediaIndexKey = `${prefix}:messages:media:index`;
+  const mediaMetaKey = `${prefix}:messages:media:meta`;
   const dataKey = messageId => `${prefix}:messages:data:${messageId}`;
   const conversationKey = conversationId => `${prefix}:messages:conversation:${conversationId}`;
 
+  function mediaMeta(message) {
+    if (!message?.file?.url || message.type === 'text') return null;
+    return JSON.stringify({
+      id: message.id,
+      url: message.file.url,
+      type: message.type,
+      conversationId: message.conversationId,
+      createdAt: message.createdAt
+    });
+  }
+
   async function removeMessageFromIndexes(messageId, message) {
     await client.zRem(globalIndexKey, messageId);
+    await client.zRem(mediaIndexKey, messageId);
+    await client.hDel(mediaMetaKey, messageId);
     if (message?.conversationId) {
       await client.zRem(conversationKey(message.conversationId), messageId);
     }
@@ -160,8 +188,32 @@ async function createRedisMessageStore() {
         await client.set(dataKey(message.id), JSON.stringify(message), { PXAT: expiresAtMs });
         await client.zAdd(globalIndexKey, [{ score: createdAtMs, value: message.id }]);
         await client.zAdd(conversationKey(message.conversationId), [{ score: createdAtMs, value: message.id }]);
+        const meta = mediaMeta(message);
+        if (meta) {
+          await client.hSet(mediaMetaKey, message.id, meta);
+          await client.zAdd(mediaIndexKey, [{ score: expiresAtMs, value: message.id }]);
+        } else {
+          await client.hDel(mediaMetaKey, message.id);
+          await client.zRem(mediaIndexKey, message.id);
+        }
         await client.expire(conversationKey(message.conversationId), retentionSeconds + 3600);
       }
+    },
+    async cleanupExpiredMediaFiles(now = Date.now()) {
+      const expiredIds = await client.zRangeByScore(mediaIndexKey, 0, now);
+      if (!expiredIds.length) return { checked: 0, deleted: 0 };
+
+      const metas = await Promise.all(expiredIds.map(messageId => client.hGet(mediaMetaKey, messageId)));
+      let deleted = 0;
+      for (const meta of metas) {
+        if (!meta) continue;
+        const payload = JSON.parse(meta);
+        if (removeMediaFileByUrl(payload.url)) deleted += 1;
+      }
+
+      await Promise.all(expiredIds.map(messageId => client.zRem(mediaIndexKey, messageId)));
+      await Promise.all(expiredIds.map(messageId => client.hDel(mediaMetaKey, messageId)));
+      return { checked: expiredIds.length, deleted };
     },
     async close() {
       await client.quit();
@@ -323,6 +375,9 @@ function createSqliteStore(messageStore) {
     async close() {
       db.close();
       await messageStore.close();
+    },
+    async cleanupExpiredMediaFiles(now) {
+      return messageStore.cleanupExpiredMediaFiles(now);
     }
   };
 }
@@ -462,6 +517,9 @@ async function createMysqlStore(messageStore) {
     async close() {
       await pool.end();
       await messageStore.close();
+    },
+    async cleanupExpiredMediaFiles(now) {
+      return messageStore.cleanupExpiredMediaFiles(now);
     }
   };
 }

@@ -81,6 +81,7 @@ REDIS_URL=redis://127.0.0.1:6379 MESSAGE_RETENTION_SECONDS=60 npm start
 - 开发环境默认 `MESSAGE_RETENTION_SECONDS=60`，即最多保存 1 分钟。
 - 生产环境默认 `MESSAGE_RETENTION_SECONDS=86400`，即最多保存 24 小时。
 - 超过保留时间后，消息记录会从 Redis 自动过期，重新进入会话时不会再加载。
+- 独立的 `media-cleanup` 定时任务服务会按 `MEDIA_CLEANUP_CRON` 扫描过期媒体消息，并删除对应的图片、音频、视频文件。
 
 ## 数据库迁移
 
