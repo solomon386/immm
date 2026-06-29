@@ -6,6 +6,7 @@ data.sqlite
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+dump.rdb
 logs/*
 !logs/.gitkeep
 uploads/*
@@ -14,6 +15,7 @@ uploads/*
 # 环境变量和密钥
 .env
 .env.*
+!.env.docker*.example
 
 # 系统和编辑器文件
 .DS_Store

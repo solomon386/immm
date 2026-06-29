@@ -136,6 +136,19 @@ npm run start:prod
 
 配置包含 Socket.IO WebSocket 升级代理，实时聊天和在线状态需要保留 `/socket.io/` 配置。详细使用方式见 `nginx/README.md`。
 
+## Docker 部署
+
+项目已提供 Docker Compose 部署配置，包含 Node.js 应用、PM2、MySQL、Redis 和 Nginx：
+
+```bash
+cp .env.docker.development.example .env
+docker compose up -d --build
+```
+
+生产环境可改用 `cp .env.docker.production.example .env`，通过 `APP_ENV`、`MESSAGE_RETENTION_SECONDS`、`NGINX_HTTP_PORT`、`NGINX_SERVER_NAME` 等变量同步切换 app、PM2、Redis、MySQL 和 Nginx 配置。
+
+详细说明见 `DOCKER.md`。
+
 ## 日志系统
 
 日志中间件接入在 HTTP Web 请求层，打开首页、加载静态资源和访问 `/api` 接口都会记录日志；每个请求都会返回 `X-Request-Id`，便于排查问题。
