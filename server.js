@@ -46,6 +46,7 @@ if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (IS_PRODUCTION && !fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const dataStore = await createDataStore(NODE_ENV);
+console.log(`[startup] 数据存储后端: ${dataStore.type}${dataStore.file ? ` (${dataStore.file})` : ''}`);
 let db = await dataStore.load();
 pruneExpiredMessages();
 await dataStore.save(db);
@@ -54,10 +55,13 @@ let saveQueue = Promise.resolve();
 function saveData() {
   pruneExpiredMessages();
   const snapshot = structuredClone(db);
-  saveQueue = saveQueue.then(() => dataStore.save(snapshot)).catch(error => {
+  const task = saveQueue.then(() => dataStore.save(snapshot));
+  saveQueue = task.catch(error => {
     console.error('[database] 保存数据失败', error);
+    return Promise.resolve();
   });
-  return saveQueue;
+  task.catch(() => {});
+  return task;
 }
 
 function setDbForTest(nextDb) {
@@ -485,7 +489,11 @@ app.post('/api/auth/register', async (req, res) => {
     createdAt: new Date().toISOString()
   };
   db.users.push(user);
-  saveData();
+  try {
+    await saveData();
+  } catch (error) {
+    return res.status(500).json({ message: '注册数据保存失败，请稍后重试' });
+  }
   res.json({ token: sign(user), user: publicUser(user) });
 });
 
@@ -511,7 +519,7 @@ app.get('/api/me', auth, (req, res) => {
   });
 });
 
-app.patch('/api/me', auth, (req, res) => {
+app.patch('/api/me', auth, async (req, res) => {
   const displayName = String(req.body.displayName || '').trim();
   const avatarUrl = String(req.body.avatarUrl || '').trim();
 
@@ -523,7 +531,11 @@ app.patch('/api/me', auth, (req, res) => {
 
   req.user.displayName = displayName;
   req.user.avatarUrl = avatarUrl;
-  saveData();
+  try {
+    await saveData();
+  } catch (error) {
+    return res.status(500).json({ message: '保存个人资料失败，请稍后重试' });
+  }
 
   const user = publicUser(req.user);
   emitToUser(req.user.id, 'profile:updated', { user });
@@ -547,7 +559,7 @@ app.get('/api/users/search', auth, (req, res) => {
   res.json(users);
 });
 
-app.post('/api/friends/request', auth, (req, res) => {
+app.post('/api/friends/request', auth, async (req, res) => {
   const { toUserId } = req.body;
   const target = db.users.find(user => user.id === toUserId);
   if (!target) return res.status(404).json({ message: '用户不存在' });
@@ -568,12 +580,16 @@ app.post('/api/friends/request', auth, (req, res) => {
     createdAt: new Date().toISOString()
   };
   db.friendRequests.push(request);
-  saveData();
+  try {
+    await saveData();
+  } catch (error) {
+    return res.status(500).json({ message: '保存好友请求失败，请稍后重试' });
+  }
   emitToUser(target.id, 'friend:request', { ...request, fromUser: publicUser(req.user) });
   res.json({ message: '好友请求已发送', request });
 });
 
-app.post('/api/friends/respond', auth, (req, res) => {
+app.post('/api/friends/respond', auth, async (req, res) => {
   const { requestId, accept } = req.body;
   const request = db.friendRequests.find(item => item.id === requestId && item.to === req.user.id);
   if (!request) return res.status(404).json({ message: '好友请求不存在' });
@@ -584,7 +600,11 @@ app.post('/api/friends/respond', auth, (req, res) => {
   if (accept && !areFriends(request.from, request.to)) {
     db.friendships.push([request.from, request.to]);
   }
-  saveData();
+  try {
+    await saveData();
+  } catch (error) {
+    return res.status(500).json({ message: '保存好友数据失败，请稍后重试' });
+  }
   const requester = db.users.find(user => user.id === request.from);
   const responder = req.user;
   emitToUser(request.from, 'friend:updated', {
@@ -612,7 +632,7 @@ app.post('/api/friends/respond', auth, (req, res) => {
   res.json({ message: accept ? '已添加好友' : '已拒绝请求' });
 });
 
-app.delete('/api/friends/:friendId', auth, (req, res) => {
+app.delete('/api/friends/:friendId', auth, async (req, res) => {
   const friend = db.users.find(user => user.id === req.params.friendId);
   if (!friend) return res.status(404).json({ message: '好友不存在' });
 
@@ -624,7 +644,11 @@ app.delete('/api/friends/:friendId', auth, (req, res) => {
     !((request.from === req.user.id && request.to === friend.id) || (request.from === friend.id && request.to === req.user.id))
   );
   const cleanup = clearConversationMessages(req.user.id, friend.id);
-  saveData();
+  try {
+    await saveData();
+  } catch (error) {
+    return res.status(500).json({ message: '删除好友数据失败，请稍后重试' });
+  }
 
   const payload = {
     userId: req.user.id,
@@ -645,13 +669,17 @@ app.get('/api/messages/:friendId', auth, (req, res) => {
   res.json(db.messages.filter(message => message.conversationId === conversationId));
 });
 
-app.delete('/api/messages/:friendId', auth, (req, res) => {
+app.delete('/api/messages/:friendId', auth, async (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能清空好友会话' });
   const friend = db.users.find(user => user.id === req.params.friendId);
   if (!friend) return res.status(404).json({ message: '好友不存在' });
 
   const cleanup = clearConversationMessages(req.user.id, friend.id);
-  saveData();
+  try {
+    await saveData();
+  } catch (error) {
+    return res.status(500).json({ message: '清空聊天记录失败，请稍后重试' });
+  }
 
   const payload = {
     userId: req.user.id,

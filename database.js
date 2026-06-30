@@ -464,9 +464,9 @@ async function createMysqlStore(messageStore) {
       const connection = await pool.getConnection();
       try {
         await connection.beginTransaction();
-        await connection.query('DELETE FROM friendships');
-        await connection.query('DELETE FROM friend_requests');
-        await connection.query('DELETE FROM users');
+        await connection.execute('DELETE FROM friendships');
+        await connection.execute('DELETE FROM friend_requests');
+        await connection.execute('DELETE FROM users');
 
         for (const user of data.users) {
           await connection.execute(`
@@ -508,6 +508,7 @@ async function createMysqlStore(messageStore) {
         await connection.commit();
       } catch (error) {
         await connection.rollback();
+        console.error('[mysql] 事务回滚:', error.message);
         throw error;
       } finally {
         connection.release();
