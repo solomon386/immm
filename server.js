@@ -64,7 +64,7 @@ function dbSummary(snapshot = db) {
 
 function logOperation(level, action, detail = {}) {
   if (!shouldWriteLog(level)) return;
-  const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info;
+  const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
   logger(`[app] ${action}`, {
     environment: NODE_ENV,
     store: dataStore.type,
