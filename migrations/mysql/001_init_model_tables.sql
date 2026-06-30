@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS friendships (
   PRIMARY KEY (user_a_id, user_b_id)
 );
 
-CREATE TABLE IF NOT EXISTS `groups` (
+CREATE TABLE IF NOT EXISTS `groupsx` (
   id VARCHAR(64) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
   owner_id VARCHAR(64) NOT NULL,

@@ -657,7 +657,7 @@ app.get('/api/me', auth, (req, res) => {
     requests: db.friendRequests
       .filter(request => request.to === req.user.id && request.status === 'pending')
       .map(request => ({ ...request, fromUser: publicUser(db.users.find(user => user.id === request.from)) })),
-    groups: db.groups
+    groupsx: db.groupsx
       .filter(group => isGroupMember(group, req.user.id))
       .map(publicGroup)
   });
@@ -882,7 +882,7 @@ app.delete('/api/friends/:friendId', auth, async (req, res) => {
   res.json({ message: '好友已删除', ...payload });
 });
 
-app.post('/api/groups', auth, async (req, res) => {
+app.post('/api/groupsx', auth, async (req, res) => {
   const name = String(req.body.name || '').trim();
   const memberIds = Array.isArray(req.body.memberIds) ? req.body.memberIds : [];
   const uniqueFriendIds = [...new Set(memberIds)]
@@ -899,7 +899,7 @@ app.post('/api/groups', auth, async (req, res) => {
     memberIds: [req.user.id, ...uniqueFriendIds],
     createdAt: new Date().toISOString()
   };
-  db.groups.push(group);
+  db.groupsx.push(group);
 
   try {
     await saveData('group:create', {
@@ -922,8 +922,8 @@ app.post('/api/groups', auth, async (req, res) => {
   res.json({ message: '群聊已创建', group: payload.group });
 });
 
-app.get('/api/groups/:groupId/messages', auth, (req, res) => {
-  const group = db.groups.find(item => item.id === req.params.groupId);
+app.get('/api/groupsx/:groupId/messages', auth, (req, res) => {
+  const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) {
     return res.status(403).json({ message: '只能查看自己加入的群聊消息' });
   }
@@ -940,8 +940,8 @@ app.get('/api/groups/:groupId/messages', auth, (req, res) => {
   res.json(db.messages.filter(message => message.conversationId === conversationId));
 });
 
-app.delete('/api/groups/:groupId/messages', auth, async (req, res) => {
-  const group = db.groups.find(item => item.id === req.params.groupId);
+app.delete('/api/groupsx/:groupId/messages', auth, async (req, res) => {
+  const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) {
     return res.status(403).json({ message: '只能清空自己加入的群聊消息' });
   }
@@ -972,15 +972,15 @@ app.delete('/api/groups/:groupId/messages', auth, async (req, res) => {
   res.json({ message: '群聊记录已清空', ...payload });
 });
 
-app.delete('/api/groups/:groupId', auth, async (req, res) => {
-  const groupIndex = db.groups.findIndex(item => item.id === req.params.groupId);
-  const group = db.groups[groupIndex];
+app.delete('/api/groupsx/:groupId', auth, async (req, res) => {
+  const groupIndex = db.groupsx.findIndex(item => item.id === req.params.groupId);
+  const group = db.groupsx[groupIndex];
   if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
   if (group.ownerId !== req.user.id) return res.status(403).json({ message: '只有群主可以解散群聊' });
 
   const memberIds = [...group.memberIds];
   const cleanup = clearGroupMessages(group.id);
-  db.groups.splice(groupIndex, 1);
+  db.groupsx.splice(groupIndex, 1);
 
   try {
     await saveData('group:dissolve', {
@@ -1126,7 +1126,7 @@ io.on('connection', socket => {
 
   socket.on('message:send', payload => {
     const { to, groupId, type, text, file } = payload || {};
-    const group = groupId ? db.groups.find(item => item.id === groupId) : null;
+    const group = groupId ? db.groupsx.find(item => item.id === groupId) : null;
     if (groupId && (!group || !isGroupMember(group, socket.user.id))) {
       socket.emit('message:error', { message: '只能在自己加入的群聊中发送消息' });
       return;
@@ -1205,7 +1205,7 @@ io.on('connection', socket => {
     }
 
     try {
-      const group = message.groupId ? db.groups.find(item => item.id === message.groupId) : null;
+      const group = message.groupId ? db.groupsx.find(item => item.id === message.groupId) : null;
       if (message.groupId && !isGroupMember(group, socket.user.id)) {
         const error = { ok: false, message: '只能删除自己所在群聊的消息' };
         socket.emit('message:error', { message: error.message });
@@ -1277,7 +1277,7 @@ io.on('connection', socket => {
       return;
     }
 
-    const group = message.groupId ? db.groups.find(item => item.id === message.groupId) : null;
+    const group = message.groupId ? db.groupsx.find(item => item.id === message.groupId) : null;
     if (message.groupId && !isGroupMember(group, socket.user.id)) {
       const error = { ok: false, message: '只能编辑自己所在群聊的消息' };
       socket.emit('message:error', { message: error.message });

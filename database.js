@@ -12,7 +12,7 @@ export const defaultData = {
   users: [],
   friendRequests: [],
   friendships: [],
-  groups: [],
+  groupsx: [],
   messages: []
 };
 
@@ -25,11 +25,11 @@ function sortedFriendship(pair = []) {
 }
 
 function hasModelData(data) {
-  return data.users.length || data.friendRequests.length || data.friendships.length || data.groups.length || data.messages.length;
+  return data.users.length || data.friendRequests.length || data.friendships.length || data.groupsx.length || data.messages.length;
 }
 
 function hasSqlModelData(data) {
-  return data.users.length || data.friendRequests.length || data.friendships.length || data.groups.length;
+  return data.users.length || data.friendRequests.length || data.friendships.length || data.groupsx.length;
 }
 
 function dataSummary(data) {
@@ -37,7 +37,7 @@ function dataSummary(data) {
     users: data.users?.length || 0,
     friendRequests: data.friendRequests?.length || 0,
     friendships: data.friendships?.length || 0,
-    groups: data.groups?.length || 0,
+    groupsx: data.groupsx?.length || 0,
     messages: data.messages?.length || 0
   };
 }
@@ -312,7 +312,7 @@ function createSqliteStore(messageStore) {
       PRIMARY KEY (user_a_id, user_b_id)
     );
 
-    CREATE TABLE IF NOT EXISTS groups (
+    CREATE TABLE IF NOT EXISTS groupsx (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       owner_id TEXT NOT NULL,
@@ -326,12 +326,12 @@ function createSqliteStore(messageStore) {
   const selectUsers = db.prepare('SELECT * FROM users ORDER BY created_at ASC');
   const selectRequests = db.prepare('SELECT * FROM friend_requests ORDER BY created_at ASC');
   const selectFriendships = db.prepare('SELECT * FROM friendships ORDER BY created_at ASC');
-  const selectGroups = db.prepare('SELECT * FROM groups ORDER BY created_at ASC');
+  const selectGroups = db.prepare('SELECT * FROM groupsx ORDER BY created_at ASC');
   const selectLegacyState = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_state'");
 
   const replaceAll = db.transaction(nextData => {
     const data = normalizeData(nextData);
-    db.exec('DELETE FROM groups; DELETE FROM friendships; DELETE FROM friend_requests; DELETE FROM users;');
+    db.exec('DELETE FROM groupsx; DELETE FROM friendships; DELETE FROM friend_requests; DELETE FROM users;');
 
     const insertUser = db.prepare(`
       INSERT INTO users (id, username, display_name, password_hash, avatar_color, avatar_url, created_at)
@@ -362,10 +362,10 @@ function createSqliteStore(messageStore) {
     });
 
     const insertGroup = db.prepare(`
-      INSERT INTO groups (id, name, owner_id, member_ids_json, created_at)
+      INSERT INTO groupsx (id, name, owner_id, member_ids_json, created_at)
       VALUES (@id, @name, @ownerId, @memberIdsJson, @createdAt)
     `);
-    data.groups.forEach(group => insertGroup.run({
+    data.groupsx.forEach(group => insertGroup.run({
       id: group.id,
       name: group.name,
       ownerId: group.ownerId,
@@ -403,7 +403,7 @@ function createSqliteStore(messageStore) {
           updatedAt: row.updated_at || undefined
         })),
         friendships: selectFriendships.all().map(row => [row.user_a_id, row.user_b_id]),
-        groups: selectGroups.all().map(row => ({
+        groupsx: selectGroups.all().map(row => ({
           id: row.id,
           name: row.name,
           ownerId: row.owner_id,
@@ -480,7 +480,7 @@ async function createMysqlStore(messageStore) {
     )
   `);
   await pool.execute(`
-    CREATE TABLE IF NOT EXISTS groups (
+    CREATE TABLE IF NOT EXISTS groupsx (
       id VARCHAR(64) PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       owner_id VARCHAR(64) NOT NULL,
@@ -497,7 +497,7 @@ async function createMysqlStore(messageStore) {
       const [users] = await pool.execute('SELECT * FROM users ORDER BY created_at ASC');
       const [requests] = await pool.execute('SELECT * FROM friend_requests ORDER BY created_at ASC');
       const [friendships] = await pool.execute('SELECT * FROM friendships ORDER BY created_at ASC');
-      const [groups] = await pool.execute('SELECT * FROM groups ORDER BY created_at ASC');
+      const [groupsx] = await pool.execute('SELECT * FROM groupsx ORDER BY created_at ASC');
       let messages = await messageStore.load();
       if (!messages.length) {
         messages = await loadLegacyMysqlMessages(pool);
@@ -521,7 +521,7 @@ async function createMysqlStore(messageStore) {
           updatedAt: row.updated_at || undefined
         })),
         friendships: friendships.map(row => [row.user_a_id, row.user_b_id]),
-        groups: groups.map(row => ({
+        groupsx: groupsx.map(row => ({
           id: row.id,
           name: row.name,
           ownerId: row.owner_id,
@@ -552,7 +552,7 @@ async function createMysqlStore(messageStore) {
       try {
         console.info('[mysql] 开始保存数据', dataSummary(data));
         await connection.beginTransaction();
-        await connection.execute('DELETE FROM groups');
+        await connection.execute('DELETE FROM groupsx');
         await connection.execute('DELETE FROM friendships');
         await connection.execute('DELETE FROM friend_requests');
         await connection.execute('DELETE FROM users');
@@ -594,9 +594,9 @@ async function createMysqlStore(messageStore) {
           `, [userA, userB, new Date().toISOString()]);
         }
 
-        for (const group of data.groups) {
+        for (const group of data.groupsx) {
           await connection.execute(`
-            INSERT INTO groups (id, name, owner_id, member_ids_json, created_at)
+            INSERT INTO groupsx (id, name, owner_id, member_ids_json, created_at)
             VALUES (?, ?, ?, ?, ?)
           `, [
             group.id,

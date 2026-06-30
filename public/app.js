@@ -3,7 +3,7 @@ const state = {
   token: localStorage.getItem('token'),
   me: null,
   friends: [],
-  groups: [],
+  groupsx: [],
   requests: [],
   selectedFriend: null,
   messages: [],
@@ -228,7 +228,7 @@ function showBrowserMessageNotification(friend, message) {
 
 function notifyIncomingMessage(conversationId, message) {
   const friend = conversationId.startsWith('group:')
-    ? { ...state.groups.find(item => item.id === conversationId.slice(6)), isGroup: true }
+    ? { ...state.groupsx.find(item => item.id === conversationId.slice(6)), isGroup: true }
     : state.friends.find(item => item.id === conversationId);
   playMessageSound();
   showBrowserMessageNotification(friend, message);
@@ -295,7 +295,7 @@ function clearLocalUserData() {
   state.token = null;
   state.me = null;
   state.friends = [];
-  state.groups = [];
+  state.groupsx = [];
   state.requests = [];
   state.selectedFriend = null;
   state.messages = [];
@@ -357,7 +357,7 @@ async function loadMe() {
   const data = await api('/api/me');
   state.me = data.user;
   state.friends = data.friends;
-  state.groups = data.groups || [];
+  state.groupsx = data.groupsx || [];
   state.requests = data.requests;
   $('#myName').textContent = state.me.displayName;
   $('#myUsername').textContent = `@${state.me.username}`;
@@ -788,13 +788,13 @@ function renderGroupMembers() {
 function renderGroups() {
   groupList.innerHTML = '';
   hideFriendContextMenu();
-  if (!state.groups.length) {
+  if (!state.groupsx.length) {
     groupList.textContent = '暂无群聊';
     groupList.classList.add('empty');
     return;
   }
   groupList.classList.remove('empty');
-  state.groups.forEach(group => {
+  state.groupsx.forEach(group => {
     const conversation = { ...group, isGroup: true };
     const item = groupItem(group);
     item.classList.toggle('has-unread', state.unreadFriendIds.has(conversationKey(conversation)));
@@ -824,7 +824,7 @@ async function createGroup() {
     return;
   }
   try {
-    const data = await api('/api/groups', {
+    const data = await api('/api/groupsx', {
       method: 'POST',
       body: JSON.stringify({ name, memberIds })
     });
@@ -979,12 +979,12 @@ async function clearFriendMessages(friendId) {
 }
 
 async function clearGroupMessages(groupId) {
-  const group = state.groups.find(item => item.id === groupId);
+  const group = state.groupsx.find(item => item.id === groupId);
   if (!group) return;
   if (!confirm(`确定一键清空群聊「${group.name}」的全部聊天记录吗？所有群成员都会看到记录被清空。`)) return;
 
   try {
-    const data = await api(`/api/groups/${groupId}/messages`, { method: 'DELETE' });
+    const data = await api(`/api/groupsx/${groupId}/messages`, { method: 'DELETE' });
     toast(data.message);
     if (state.selectedFriend?.isGroup && state.selectedFriend.id === groupId) {
       state.messages = [];
@@ -996,7 +996,7 @@ async function clearGroupMessages(groupId) {
 }
 
 async function dissolveGroup(groupId) {
-  const group = state.groups.find(item => item.id === groupId);
+  const group = state.groupsx.find(item => item.id === groupId);
   if (!group) return;
   if (group.ownerId !== state.me?.id) {
     toast('只有群主可以解散群聊', true);
@@ -1005,7 +1005,7 @@ async function dissolveGroup(groupId) {
   if (!confirm(`确定解散群聊「${group.name}」吗？群聊消息会全部清空且不可恢复。`)) return;
 
   try {
-    const data = await api(`/api/groups/${groupId}`, { method: 'DELETE' });
+    const data = await api(`/api/groupsx/${groupId}`, { method: 'DELETE' });
     toast(data.message);
     await loadMe();
     if (state.selectedFriend?.isGroup && state.selectedFriend.id === groupId) {
@@ -1082,7 +1082,7 @@ async function selectGroup(group) {
   resetMessageEditor();
   state.selectedFriend = { ...group, isGroup: true };
   state.unreadFriendIds.delete(conversationKey(state.selectedFriend));
-  state.messages = await api(`/api/groups/${group.id}/messages`);
+  state.messages = await api(`/api/groupsx/${group.id}/messages`);
   messageInput.disabled = false;
   fileInput.disabled = false;
   sendBtn.disabled = false;
@@ -1213,7 +1213,7 @@ async function handleMessageEdited(payload) {
 
   try {
     state.messages = isGroupMessage
-      ? await api(`/api/groups/${editedMessage.groupId}/messages`)
+      ? await api(`/api/groupsx/${editedMessage.groupId}/messages`)
       : await api(`/api/messages/${conversationId}`);
     renderMessages();
   } catch (error) {
