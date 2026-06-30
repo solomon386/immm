@@ -31,6 +31,15 @@ function hasSqlModelData(data) {
   return data.users.length || data.friendRequests.length || data.friendships.length;
 }
 
+function dataSummary(data) {
+  return {
+    users: data.users?.length || 0,
+    friendRequests: data.friendRequests?.length || 0,
+    friendships: data.friendships?.length || 0,
+    messages: data.messages?.length || 0
+  };
+}
+
 function messageRetentionSeconds() {
   if (process.env.MESSAGE_RETENTION_SECONDS) {
     return Number(process.env.MESSAGE_RETENTION_SECONDS);
@@ -78,6 +87,17 @@ function mysqlConfigFromEnv() {
     database: process.env.MYSQL_DATABASE || 'web_im_chat',
     waitForConnections: true,
     connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT || 10)
+  };
+}
+
+function publicMysqlConfig(config) {
+  if (config.uri) return { uri: '[DATABASE_URL 已配置，内容已隐藏]' };
+  return {
+    host: config.host,
+    port: config.port,
+    user: config.user,
+    database: config.database,
+    connectionLimit: config.connectionLimit
   };
 }
 
@@ -260,6 +280,7 @@ function createSqliteStore(messageStore) {
   const sqliteFile = process.env.SQLITE_FILE || path.join(__dirname, 'data.sqlite');
   const sqliteDir = path.dirname(sqliteFile);
   if (!fs.existsSync(sqliteDir)) fs.mkdirSync(sqliteDir, { recursive: true });
+  console.info('[sqlite] 初始化本地数据库', { file: sqliteFile });
   const db = new Database(sqliteFile);
 
   db.exec(`
@@ -335,6 +356,7 @@ function createSqliteStore(messageStore) {
     type: 'sqlite',
     file: sqliteFile,
     async load() {
+      console.info('[sqlite] 开始加载数据');
       let messages = await messageStore.load();
       if (!messages.length) {
         messages = loadLegacySqliteMessages(db);
@@ -360,17 +382,26 @@ function createSqliteStore(messageStore) {
         friendships: selectFriendships.all().map(row => [row.user_a_id, row.user_b_id]),
         messages
       });
+      console.info('[sqlite] 加载完成', dataSummary(data));
       if (hasModelData(data)) return data;
       if (selectLegacyState.get()) {
         const legacy = db.prepare('SELECT data FROM app_state WHERE id = ?').get('default');
-        if (legacy?.data) return normalizeData(JSON.parse(legacy.data));
+        if (legacy?.data) {
+          const legacyData = normalizeData(JSON.parse(legacy.data));
+          console.info('[sqlite] 使用 app_state 旧数据', dataSummary(legacyData));
+          return legacyData;
+        }
       }
-      return loadLegacyJsonData();
+      const legacyJson = loadLegacyJsonData();
+      console.info('[sqlite] 使用 data.json 旧数据', dataSummary(legacyJson));
+      return legacyJson;
     },
     async save(nextData) {
       const data = normalizeData(nextData);
+      console.info('[sqlite] 开始保存数据', dataSummary(data));
       replaceAll(data);
       await messageStore.save(data.messages);
+      console.info('[sqlite] 保存完成', dataSummary(data));
     },
     async close() {
       db.close();
@@ -384,8 +415,10 @@ function createSqliteStore(messageStore) {
 
 async function createMysqlStore(messageStore) {
   const config = mysqlConfigFromEnv();
+  console.info('[mysql] 初始化连接池', publicMysqlConfig(config));
   const pool = config.uri ? mysql.createPool(config.uri) : mysql.createPool(config);
 
+  console.info('[mysql] 开始初始化数据表');
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id VARCHAR(64) PRIMARY KEY,
@@ -416,10 +449,12 @@ async function createMysqlStore(messageStore) {
       PRIMARY KEY (user_a_id, user_b_id)
     )
   `);
+  console.info('[mysql] 数据表初始化完成');
 
   return {
     type: 'mysql',
     async load() {
+      console.info('[mysql] 开始加载数据');
       const [users] = await pool.execute('SELECT * FROM users ORDER BY created_at ASC');
       const [requests] = await pool.execute('SELECT * FROM friend_requests ORDER BY created_at ASC');
       const [friendships] = await pool.execute('SELECT * FROM friendships ORDER BY created_at ASC');
@@ -448,21 +483,27 @@ async function createMysqlStore(messageStore) {
         friendships: friendships.map(row => [row.user_a_id, row.user_b_id]),
         messages
       });
+      console.info('[mysql] 加载完成', dataSummary(data));
       if (hasModelData(data)) return data;
       const [legacyTables] = await pool.execute("SHOW TABLES LIKE 'app_state'");
       if (legacyTables.length) {
         const [legacyRows] = await pool.execute('SELECT data FROM app_state WHERE id = ?', ['default']);
         if (legacyRows.length) {
           const legacy = typeof legacyRows[0].data === 'string' ? JSON.parse(legacyRows[0].data) : legacyRows[0].data;
-          return normalizeData(legacy);
+          const legacyData = normalizeData(legacy);
+          console.info('[mysql] 使用 app_state 旧数据', dataSummary(legacyData));
+          return legacyData;
         }
       }
-      return loadLegacyJsonData();
+      const legacyJson = loadLegacyJsonData();
+      console.info('[mysql] 使用 data.json 旧数据', dataSummary(legacyJson));
+      return legacyJson;
     },
     async save(nextData) {
       const data = normalizeData(nextData);
       const connection = await pool.getConnection();
       try {
+        console.info('[mysql] 开始保存数据', dataSummary(data));
         await connection.beginTransaction();
         await connection.execute('DELETE FROM friendships');
         await connection.execute('DELETE FROM friend_requests');
@@ -506,6 +547,7 @@ async function createMysqlStore(messageStore) {
         }
 
         await connection.commit();
+        console.info('[mysql] 事务提交完成', dataSummary(data));
       } catch (error) {
         await connection.rollback();
         console.error('[mysql] 事务回滚:', error.message);
@@ -514,6 +556,7 @@ async function createMysqlStore(messageStore) {
         connection.release();
       }
       await messageStore.save(data.messages);
+      console.info('[mysql] 消息存储同步完成', { messages: data.messages.length });
     },
     async close() {
       await pool.end();
