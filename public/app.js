@@ -56,7 +56,6 @@ const friendResponseList = $('#friendResponseList');
 const messagesEl = $('#messages');
 const messageInput = $('#messageInput');
 const fileInput = $('#fileInput');
-const screenshotBtn = $('#screenshotBtn');
 const screenshotPreview = $('#screenshotPreview');
 const screenshotPreviewImg = $('#screenshotPreviewImg');
 const screenshotPreviewName = $('#screenshotPreviewName');
@@ -828,7 +827,6 @@ function openCreateGroupPage() {
   clearScreenshotPreview();
   messageInput.disabled = true;
   fileInput.disabled = true;
-  screenshotBtn.disabled = true;
   sendBtn.disabled = true;
   chatConversationView.classList.add('hidden');
   chatListView.classList.add('hidden');
@@ -1370,7 +1368,6 @@ function resetConversation(message = '请选择好友开始聊天', status = '�
   clearScreenshotPreview();
   messageInput.disabled = true;
   fileInput.disabled = true;
-  screenshotBtn.disabled = true;
   sendBtn.disabled = true;
   voiceCallBtn.disabled = true;
   videoCallBtn.disabled = true;
@@ -1526,7 +1523,6 @@ async function selectFriend(friend) {
   state.messages = await api(`/api/messages/${friend.id}`);
   messageInput.disabled = false;
   fileInput.disabled = false;
-  screenshotBtn.disabled = false;
   sendBtn.disabled = false;
   voiceCallBtn.disabled = !state.callsEnabled || !friend.online;
   videoCallBtn.disabled = !state.callsEnabled || !friend.online;
@@ -1547,7 +1543,6 @@ async function selectGroup(group) {
   state.messages = await api(`/api/groupsx/${group.id}/messages`);
   messageInput.disabled = false;
   fileInput.disabled = false;
-  screenshotBtn.disabled = false;
   sendBtn.disabled = false;
   voiceCallBtn.disabled = true;
   videoCallBtn.disabled = true;
@@ -1706,7 +1701,6 @@ function startEditMessage(messageId) {
   messageInput.focus();
   sendBtn.textContent = '保存编辑';
   fileInput.disabled = true;
-  screenshotBtn.disabled = true;
   clearScreenshotPreview();
   toast('正在编辑消息，修改后点击保存编辑');
 }
@@ -1715,7 +1709,6 @@ function resetMessageEditor() {
   state.editingMessageId = null;
   sendBtn.textContent = '发送';
   fileInput.disabled = !state.selectedFriend;
-  screenshotBtn.disabled = !state.selectedFriend;
 }
 
 function deleteMessage(messageId, button) {
@@ -1809,7 +1802,6 @@ $('#messageForm').addEventListener('submit', event => {
   sendText();
 });
 
-screenshotBtn?.addEventListener('click', captureScreenshot);
 clearScreenshotBtn?.addEventListener('click', clearScreenshotPreview);
 
 $('#messageForm').addEventListener('dragover', event => {
@@ -1857,39 +1849,6 @@ function setAttachmentPreview(file) {
     screenshotPreviewImg.classList.add('hidden');
   }
   screenshotPreview.classList.remove('hidden');
-}
-
-async function captureScreenshot() {
-  if (!state.selectedFriend) return;
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    toast('当前浏览器不支持屏幕截图', true);
-    return;
-  }
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-    const video = document.createElement('video');
-    video.srcObject = stream;
-    video.muted = true;
-    await video.play();
-    await new Promise(resolve => {
-      if (video.videoWidth) resolve();
-      else video.onloadedmetadata = resolve;
-    });
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) throw new Error('截图生成失败');
-    const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
-    setAttachmentPreview(file);
-    toast('截图已放入输入框预览，点击发送即可发送');
-  } catch (error) {
-    if (error.name !== 'NotAllowedError') toast(error.message || '截图失败', true);
-  } finally {
-    stream?.getTracks().forEach(track => track.stop());
-  }
 }
 
 async function uploadAndSendFile(file) {
