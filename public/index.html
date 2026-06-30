@@ -108,7 +108,14 @@
                   </div>
                 </div>
                 <form id="messageForm" class="composer">
-                  <input id="messageInput" placeholder="输入文本消息..." disabled />
+                  <div class="composer-input-wrap">
+                    <div id="screenshotPreview" class="screenshot-preview hidden">
+                      <img id="screenshotPreviewImg" alt="截图预览" />
+                      <button id="clearScreenshotBtn" type="button" aria-label="移除截图">×</button>
+                    </div>
+                    <input id="messageInput" placeholder="输入文本消息..." disabled />
+                  </div>
+                  <button id="screenshotBtn" class="ghost tool-btn" type="button" disabled>截图</button>
                   <label class="file-btn">
                     媒体
                     <input id="fileInput" type="file" accept="image/*,audio/*,video/*" hidden disabled />
