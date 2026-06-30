@@ -11,6 +11,8 @@ const state = {
   socket: null,
   call: null,
   callsEnabled: false,
+  notificationPermissionRequested: false,
+  audioContext: null,
   contextFriendId: null,
   contextMessageId: null,
   editingMessageId: null
@@ -85,6 +87,85 @@ function toast(message, error = false) {
   setTimeout(() => el.remove(), 2200);
 }
 
+function isPageInactive() {
+  return document.hidden || !document.hasFocus();
+}
+
+function messagePreview(message) {
+  if (message.type === 'image') return '[图片]';
+  if (message.type === 'audio') return '[音频]';
+  if (message.type === 'video') return '[视频]';
+  return message.text || '收到一条新消息';
+}
+
+function ensureAudioContext() {
+  if (!window.AudioContext && !window.webkitAudioContext) return null;
+  if (!state.audioContext) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    state.audioContext = new AudioContextClass();
+  }
+  if (state.audioContext.state === 'suspended') {
+    state.audioContext.resume().catch(() => {});
+  }
+  return state.audioContext;
+}
+
+function playMessageSound() {
+  const audioContext = ensureAudioContext();
+  if (!audioContext || audioContext.state !== 'running') return;
+
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+  oscillator.frequency.setValueAtTime(660, audioContext.currentTime + 0.12);
+  gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.16, audioContext.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.28);
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.3);
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'default' || state.notificationPermissionRequested) return;
+  state.notificationPermissionRequested = true;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === 'default') state.notificationPermissionRequested = false;
+  } catch {
+    // 浏览器可能要求在用户手势内申请权限，失败时等待下一次用户交互。
+    state.notificationPermissionRequested = false;
+  }
+}
+
+function prepareMessageNotifications() {
+  ensureAudioContext();
+  requestNotificationPermission();
+}
+
+function showBrowserMessageNotification(friend, message) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const notification = new Notification(`来自 ${friend?.displayName || friend?.username || '好友'} 的新消息`, {
+    body: messagePreview(message),
+    icon: friend?.avatarUrl || undefined,
+    tag: `message:${message.id}`,
+    renotify: false
+  });
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+  };
+}
+
+function notifyIncomingMessage(friendId, message) {
+  const friend = state.friends.find(item => item.id === friendId);
+  playMessageSound();
+  showBrowserMessageNotification(friend, message);
+}
+
 async function api(url, options = {}) {
   const res = await fetch(url, {
     ...options,
@@ -132,6 +213,7 @@ function setAvatar(el, user) {
 function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
+  requestNotificationPermission();
 }
 
 function showAuth() {
@@ -152,6 +234,7 @@ function clearLocalUserData() {
   state.contextFriendId = null;
   state.contextMessageId = null;
   state.editingMessageId = null;
+  state.notificationPermissionRequested = false;
 
   authForm.reset();
   authTip.textContent = '';
@@ -216,11 +299,17 @@ function connectSocket() {
   state.socket.on('message:new', message => {
     const friendId = message.from === state.me.id ? message.to : message.from;
     const isCurrentConversation = state.selectedFriend?.id === friendId;
+    const isIncoming = message.to === state.me.id;
+    const shouldNotify = isIncoming && isPageInactive();
 
     if (isCurrentConversation) {
       if (!state.messages.some(item => item.id === message.id)) state.messages.push(message);
       renderMessages();
-      if (message.from === state.selectedFriend.id && message.to === state.me.id) {
+      if (shouldNotify) {
+        state.unreadFriendIds.add(friendId);
+        renderFriends();
+        notifyIncomingMessage(friendId, message);
+      } else if (isIncoming) {
         state.unreadFriendIds.delete(friendId);
         renderFriends();
         markSelectedConversationRead();
@@ -228,10 +317,14 @@ function connectSocket() {
       return;
     }
 
-    if (message.to === state.me.id) {
+    if (isIncoming) {
       state.unreadFriendIds.add(friendId);
       renderFriends();
-      toast('收到新的好友消息');
+      if (shouldNotify) {
+        notifyIncomingMessage(friendId, message);
+      } else {
+        toast('收到新的好友消息');
+      }
     }
   });
 
@@ -314,9 +407,22 @@ authForm.addEventListener('submit', async event => {
     await loadMe();
     connectSocket();
     showChat();
+    prepareMessageNotifications();
     authForm.reset();
   } catch (error) {
     toast(error.message, true);
+  }
+});
+
+document.addEventListener('pointerdown', () => {
+  if (state.token) prepareMessageNotifications();
+}, { once: true });
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.selectedFriend && state.unreadFriendIds.has(state.selectedFriend.id)) {
+    state.unreadFriendIds.delete(state.selectedFriend.id);
+    renderFriends();
+    markSelectedConversationRead();
   }
 });
 

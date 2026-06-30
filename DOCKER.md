@@ -200,3 +200,27 @@ docker compose exec app npm run db:migrate
 ```bash
 docker compose exec app npm run db:migrate:status
 ```
+
+
+# 修改.env后restart环境变量未加载成功
+
+在使用 Docker Compose 时，仅修改 .env 文件并执行 docker compose up -d，往往不会触发容器重建，因此环境变量不会更新。这是因为 Compose 默认不会检测 .env 文件变化。以下是几种常用且高效的刷新方法。
+
+### 方法一：强制重建容器
+
+步骤：
+- 修改 .env 文件内容并保存。
+执行： docker compose up -d --force-recreate [service_name] 可指定单个服务，避免影响其他服务。
+该命令会重新读取 .env 文件并重建容器，同时保留网络和卷。
+特点：
+- 更新速度快。
+- 不会中断无关服务。
+- 推荐在生产环境使用。
+
+
+```bash
+docker compose up -d --force-recreate [service_name]
+docker compose up -d --force-recreate app
+docker compose up -d --force-recreate media-cleanup
+```
+
