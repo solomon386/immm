@@ -74,6 +74,9 @@ const remoteAudioAvatar = $('#remoteAudioAvatar');
 const localMediaLabel = $('#localMediaLabel');
 const remoteMediaLabel = $('#remoteMediaLabel');
 const incomingActions = $('#incomingActions');
+const imagePreviewOverlay = $('#imagePreviewOverlay');
+const imagePreviewImg = $('#imagePreviewImg');
+const closeImagePreviewBtn = $('#closeImagePreviewBtn');
 const friendContextMenu = $('#friendContextMenu');
 const contextDeleteFriendBtn = $('#contextDeleteFriendBtn');
 const chatContextMenu = $('#chatContextMenu');
@@ -1345,6 +1348,7 @@ document.addEventListener('keydown', event => {
     hideChatContextMenu();
     hideMessageContextMenu();
     closeGroupMemberModal();
+    closeImagePreview();
     if (state.editingMessageId) {
       messageInput.value = '';
       resetMessageEditor();
@@ -1771,6 +1775,13 @@ function renderMessageBody(message) {
     const img = document.createElement('img');
     img.src = url;
     img.alt = message.file?.name || '图片消息';
+    img.title = '双击放大预览';
+    img.classList.add('previewable-image');
+    img.addEventListener('dblclick', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openImagePreview(url, img.alt);
+    });
     return img;
   }
   if (message.type === 'audio') {
@@ -1803,6 +1814,21 @@ $('#messageForm').addEventListener('submit', event => {
 });
 
 clearScreenshotBtn?.addEventListener('click', clearScreenshotPreview);
+closeImagePreviewBtn?.addEventListener('click', closeImagePreview);
+imagePreviewOverlay?.addEventListener('click', event => {
+  if (event.target === imagePreviewOverlay) closeImagePreview();
+});
+
+function openImagePreview(src, alt = '图片预览') {
+  imagePreviewImg.src = src;
+  imagePreviewImg.alt = alt;
+  imagePreviewOverlay.classList.remove('hidden');
+}
+
+function closeImagePreview() {
+  imagePreviewOverlay?.classList.add('hidden');
+  if (imagePreviewImg) imagePreviewImg.src = '';
+}
 
 $('#messageForm').addEventListener('dragover', event => {
   if (!state.selectedFriend || state.editingMessageId) return;
