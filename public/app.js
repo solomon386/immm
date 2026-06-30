@@ -18,7 +18,8 @@ const state = {
   contextGroupId: null,
   contextMessageId: null,
   editingMessageId: null,
-  currentTab: 'chat'
+  currentTab: 'chat',
+  deletedConversations: new Set()
 };
 
 const $ = selector => document.querySelector(selector);
@@ -65,7 +66,9 @@ const remoteMediaLabel = $('#remoteMediaLabel');
 const incomingActions = $('#incomingActions');
 const friendContextMenu = $('#friendContextMenu');
 const contextDeleteFriendBtn = $('#contextDeleteFriendBtn');
-const contextClearMessagesBtn = $('#contextClearMessagesBtn');
+const chatContextMenu = $('#chatContextMenu');
+const contextChatClearMessagesBtn = $('#contextChatClearMessagesBtn');
+const contextDeleteConversationBtn = $('#contextDeleteConversationBtn');
 const messageContextMenu = $('#messageContextMenu');
 const contextDeleteMessageBtn = $('#contextDeleteMessageBtn');
 const contextEditMessageBtn = $('#contextEditMessageBtn');
@@ -349,6 +352,7 @@ function clearLocalUserData() {
   state.editingMessageId = null;
   state.notificationPermissionRequested = false;
   state.currentTab = 'chat';
+  state.deletedConversations.clear();
   document.title = originalTitle;
 
   authForm.reset();
@@ -703,6 +707,15 @@ function conversationKey(conversation) {
   return conversation.isGroup ? `group:${conversation.id}` : conversation.id;
 }
 
+async function openConversationFromFriendTab(conversation) {
+  hideFriendContextMenu();
+  const key = conversationKey(conversation);
+  state.deletedConversations.delete(key);
+  switchTab('chat');
+  if (conversation.isGroup) await selectGroup(conversation);
+  else await selectFriend(conversation);
+}
+
 function selectedConversationKey() {
   return conversationKey(state.selectedFriend);
 }
@@ -841,7 +854,7 @@ function renderFriends() {
       showFriendContextMenu(event, friend);
     });
     item.classList.toggle('active', !state.selectedFriend?.isGroup && state.selectedFriend?.id === friend.id);
-    item.addEventListener('click', () => selectFriend(friend));
+    item.addEventListener('click', () => openConversationFromFriendTab(friend));
     friendList.appendChild(item);
   });
 }
@@ -887,14 +900,14 @@ function renderGroups() {
       event.stopPropagation();
       showFriendContextMenu(event, conversation);
     });
-    item.addEventListener('click', () => selectGroup(group));
+    item.addEventListener('click', () => openConversationFromFriendTab({ ...group, isGroup: true }));
     groupList.appendChild(item);
   });
 }
 
 function renderChatList() {
   chatConversationList.innerHTML = '';
-  hideFriendContextMenu();
+  hideChatContextMenu();
   const allConversations = [
     ...state.friends.map(f => ({ ...f, isGroup: false, sortKey: f.displayName })),
     ...state.groupsx.map(g => ({ ...g, isGroup: true, sortKey: g.name }))
@@ -906,23 +919,25 @@ function renderChatList() {
     return;
   }
   chatConversationList.classList.remove('empty');
-  allConversations.forEach(conv => {
-    const item = conv.isGroup ? groupItem(conv) : userItem(conv);
-    const key = conversationKey(conv);
-    item.classList.toggle('has-unread', state.unreadFriendIds.has(key));
-    item.classList.toggle('active', selectedConversationKey() === key);
-    item.title = '左键聊天，右键打开更多操作';
-    item.addEventListener('contextmenu', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      showFriendContextMenu(event, conv);
+  allConversations
+    .filter(conv => !state.deletedConversations.has(conversationKey(conv)))
+    .forEach(conv => {
+      const item = conv.isGroup ? groupItem(conv) : userItem(conv);
+      const key = conversationKey(conv);
+      item.classList.toggle('has-unread', state.unreadFriendIds.has(key));
+      item.classList.toggle('active', selectedConversationKey() === key);
+      item.title = '左键聊天，右键打开更多操作';
+      item.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showChatContextMenu(event, conv);
+      });
+      item.addEventListener('click', () => {
+        if (conv.isGroup) selectGroup(conv);
+        else selectFriend(conv);
+      });
+      chatConversationList.appendChild(item);
     });
-    item.addEventListener('click', () => {
-      if (conv.isGroup) selectGroup(conv);
-      else selectFriend(conv);
-    });
-    chatConversationList.appendChild(item);
-  });
 }
 
 createGroupBtn?.addEventListener('click', createGroup);
@@ -1079,12 +1094,12 @@ async function removeGroupMember(groupId, memberId, displayName) {
 
 function showFriendContextMenu(event, friend) {
   hideMessageContextMenu();
+  hideChatContextMenu();
   state.contextFriendId = friend.isGroup ? null : friend.id;
   state.contextGroupId = friend.isGroup ? friend.id : null;
   contextDeleteFriendBtn.textContent = friend.isGroup ? '解散群聊' : '删除好友';
   contextDeleteFriendBtn.disabled = friend.isGroup && friend.ownerId !== state.me?.id;
   contextDeleteFriendBtn.title = contextDeleteFriendBtn.disabled ? '只有群主可以解散群聊' : '';
-  contextClearMessagesBtn.textContent = friend.isGroup ? '清空群聊记录' : '清空聊天记录';
   friendContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
   friendContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
   friendContextMenu.classList.remove('hidden');
@@ -1096,12 +1111,30 @@ function hideFriendContextMenu() {
   contextDeleteFriendBtn.textContent = '删除好友';
   contextDeleteFriendBtn.disabled = false;
   contextDeleteFriendBtn.title = '';
-  contextClearMessagesBtn.textContent = '清空聊天记录';
   friendContextMenu?.classList.add('hidden');
+}
+
+function showChatContextMenu(event, conv) {
+  hideFriendContextMenu();
+  hideMessageContextMenu();
+  state.contextFriendId = conv.isGroup ? null : conv.id;
+  state.contextGroupId = conv.isGroup ? conv.id : null;
+  contextChatClearMessagesBtn.textContent = conv.isGroup ? '清空群聊记录' : '清空聊天记录';
+  chatContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
+  chatContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
+  chatContextMenu.classList.remove('hidden');
+}
+
+function hideChatContextMenu() {
+  state.contextFriendId = null;
+  state.contextGroupId = null;
+  contextChatClearMessagesBtn.textContent = '清空聊天记录';
+  chatContextMenu?.classList.add('hidden');
 }
 
 function showMessageContextMenu(event, message) {
   hideFriendContextMenu();
+  hideChatContextMenu();
   state.contextMessageId = message.id;
   contextEditMessageBtn.disabled = message.type !== 'text';
   contextEditMessageBtn.title = message.type === 'text' ? '' : '只能编辑文本消息';
@@ -1123,12 +1156,25 @@ contextDeleteFriendBtn.addEventListener('click', () => {
   if (friendId) deleteFriend(friendId);
 });
 
-contextClearMessagesBtn.addEventListener('click', () => {
+contextChatClearMessagesBtn.addEventListener('click', () => {
   const friendId = state.contextFriendId;
   const groupId = state.contextGroupId;
-  hideFriendContextMenu();
+  hideChatContextMenu();
   if (groupId) clearGroupMessages(groupId);
   if (friendId) clearFriendMessages(friendId);
+});
+
+contextDeleteConversationBtn.addEventListener('click', () => {
+  const friendId = state.contextFriendId;
+  const groupId = state.contextGroupId;
+  const convId = groupId ? `group:${groupId}` : friendId;
+  hideChatContextMenu();
+  state.deletedConversations.add(convId);
+  state.unreadFriendIds.delete(convId);
+  if (state.selectedFriend && selectedConversationKey() === convId) {
+    resetConversation();
+  }
+  renderChatList();
 });
 
 contextDeleteMessageBtn.addEventListener('click', () => {
@@ -1145,12 +1191,14 @@ contextEditMessageBtn.addEventListener('click', () => {
 
 document.addEventListener('click', event => {
   if (!friendContextMenu.contains(event.target)) hideFriendContextMenu();
+  if (!chatContextMenu.contains(event.target)) hideChatContextMenu();
   if (!messageContextMenu.contains(event.target)) hideMessageContextMenu();
 });
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     hideFriendContextMenu();
+    hideChatContextMenu();
     hideMessageContextMenu();
     closeGroupMemberModal();
     if (state.editingMessageId) {
@@ -1163,6 +1211,7 @@ document.addEventListener('keydown', event => {
 
 window.addEventListener('scroll', () => {
   hideFriendContextMenu();
+  hideChatContextMenu();
   hideMessageContextMenu();
 }, true);
 
