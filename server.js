@@ -551,19 +551,28 @@ function buildRequestData(req) {
   return Object.keys(data).length ? data : null;
 }
 
+const SILENT_ROUTES = ['/api/config'];
+
+function isSilentRoute(path) {
+  return SILENT_ROUTES.some(route => path.startsWith(route));
+}
+
 function requestLogger(req, res, next) {
   const startedAt = process.hrtime.bigint();
   const requestId = req.headers['x-request-id'] || uuid();
   req.requestId = requestId;
   res.setHeader('X-Request-Id', requestId);
-  logOperation('info', 'HTTP 请求开始', {
-    requestId,
-    method: req.method,
-    path: req.originalUrl,
-    routeType: req.originalUrl.startsWith('/api') ? 'api' : 'static',
-    ip: req.ip,
-    userAgent: req.get('user-agent') || ''
-  });
+  const silent = isSilentRoute(req.originalUrl);
+  if (!silent) {
+    logOperation('info', 'HTTP 请求开始', {
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      routeType: req.originalUrl.startsWith('/api') ? 'api' : 'static',
+      ip: req.ip,
+      userAgent: req.get('user-agent') || ''
+    });
+  }
 
   res.on('finish', () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
@@ -580,7 +589,9 @@ function requestLogger(req, res, next) {
       userId: req.user?.id || null,
       requestData: buildRequestData(req)
     };
-    logOperation(entry.level, 'HTTP 请求完成', entry);
+    if (!silent) {
+      logOperation(entry.level, 'HTTP 请求完成', entry);
+    }
     logWebRequest({
       ...entry
     });
