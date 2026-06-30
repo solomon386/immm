@@ -44,10 +44,10 @@ server {
     add_header Cache-Control "${NGINX_UPLOAD_CACHE_CONTROL}" always;
   }
 
-  location /.well-known/pki-validation/3D52D858ECEDCEB2114DB829C645DCF6.txt {
-    default_type text/html;
-    return 200 "9A71CC6EAF902E3CBDD46242EA1042C076779A26A0D08E0A01B5D75BE5512FE0 comodoca.com 4f0706330a6fbb6";
-  }
+  #location /.well-known/pki-validation/3D52D858ECEDCEB2114DB829C645DCF6.txt {
+  #  default_type text/html;
+  #  return 200 "9A71CC6EAF902E3CBDD46242EA1042C076779A26A0D08E0A01B5D75BE5512FE0 comodoca.com 4f0706330a6fbb6";
+  #}
 
   location / {
     proxy_pass http://web_im_chat_app;

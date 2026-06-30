@@ -460,7 +460,7 @@ app.use('/uploads', express.static(UPLOAD_DIR, {
   }
 }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(path.join(__dirname, '.well-known')));
+app.use(express.static(path.join(__dirname, '.well-known/pki-validation')));
 
 app.get('/api/config', (req, res) => {
   res.json({
