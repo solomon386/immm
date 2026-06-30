@@ -716,6 +716,37 @@ app.patch('/api/me', auth, async (req, res) => {
   res.json({ message: '个人资料已更新', user });
 });
 
+app.patch('/api/me/password', auth, async (req, res) => {
+  const currentPassword = String(req.body.currentPassword || '');
+  const newPassword = String(req.body.newPassword || '');
+
+  if (!currentPassword || !newPassword) return res.status(400).json({ message: '当前密码和新密码不能为空' });
+  if (newPassword.length < 6) return res.status(400).json({ message: '新密码至少 6 位' });
+  if (!(await bcrypt.compare(currentPassword, req.user.passwordHash))) {
+    return res.status(401).json({ message: '当前密码错误' });
+  }
+  if (await bcrypt.compare(newPassword, req.user.passwordHash)) {
+    return res.status(400).json({ message: '新密码不能与当前密码相同' });
+  }
+
+  req.user.passwordHash = await bcrypt.hash(newPassword, 10);
+  try {
+    await saveData('password:update', {
+      requestId: req.requestId,
+      userId: req.user.id
+    });
+  } catch (error) {
+    logOperation('error', '密码修改保存失败', {
+      requestId: req.requestId,
+      userId: req.user.id,
+      error: error.message
+    });
+    return res.status(500).json({ message: '修改密码失败，请稍后重试' });
+  }
+
+  res.json({ message: '密码已修改' });
+});
+
 app.get('/api/users/search', auth, (req, res) => {
   const keyword = String(req.query.q || '').trim().toLowerCase();
   if (!keyword) return res.json([]);

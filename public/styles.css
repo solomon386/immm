@@ -462,6 +462,28 @@ input:focus {
   color: var(--danger);
 }
 
+.settings-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.settings-form label {
+  font-size: 13px;
+}
+
+.settings-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-form-actions button {
+  flex: 1;
+}
+
 /* ===== 群成员管理 ===== */
 .modal-overlay {
   position: fixed;

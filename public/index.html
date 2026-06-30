@@ -193,6 +193,31 @@
               <div class="settings-list">
                 <div class="setting-item">
                   <div class="setting-info">
+                    <strong>修改密码</strong>
+                    <span>使用当前密码验证后设置新密码</span>
+                  </div>
+                  <button id="changePasswordBtn" class="ghost" type="button">修改</button>
+                </div>
+                <form id="changePasswordForm" class="settings-form hidden">
+                  <label>
+                    当前密码
+                    <input id="currentPasswordInput" type="password" autocomplete="current-password" placeholder="请输入当前密码" />
+                  </label>
+                  <label>
+                    新密码
+                    <input id="newPasswordInput" type="password" autocomplete="new-password" minlength="6" placeholder="至少 6 位" />
+                  </label>
+                  <label>
+                    确认新密码
+                    <input id="confirmPasswordInput" type="password" autocomplete="new-password" minlength="6" placeholder="再次输入新密码" />
+                  </label>
+                  <div class="settings-form-actions">
+                    <button class="primary" type="submit">保存新密码</button>
+                    <button id="cancelChangePasswordBtn" class="ghost" type="button">取消</button>
+                  </div>
+                </form>
+                <div class="setting-item">
+                  <div class="setting-info">
                     <strong>消息提醒</strong>
                     <span>接收新消息时播放声音和弹框提醒</span>
                   </div>

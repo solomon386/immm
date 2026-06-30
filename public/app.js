@@ -94,6 +94,12 @@ const chatAddMenu = $('#chatAddMenu');
 const openCreateGroupBtn = $('#openCreateGroupBtn');
 const backToChatFromCreateGroup = $('#backToChatFromCreateGroup');
 const backToChatList = $('#backToChatList');
+const changePasswordBtn = $('#changePasswordBtn');
+const changePasswordForm = $('#changePasswordForm');
+const currentPasswordInput = $('#currentPasswordInput');
+const newPasswordInput = $('#newPasswordInput');
+const confirmPasswordInput = $('#confirmPasswordInput');
+const cancelChangePasswordBtn = $('#cancelChangePasswordBtn');
 const bottomNav = $('.bottom-nav');
 const rtcConfig = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -375,6 +381,8 @@ function clearLocalUserData() {
   searchResults.className = 'list compact';
   $('#searchInput').value = '';
   groupNameInput.value = '';
+  changePasswordForm.classList.add('hidden');
+  changePasswordForm.reset();
   createGroupView.classList.add('hidden');
   chatConversationView.classList.add('hidden');
   chatListView.classList.remove('hidden');
@@ -600,6 +608,48 @@ openCreateGroupBtn?.addEventListener('click', () => {
 
 backToChatFromCreateGroup?.addEventListener('click', () => {
   closeCreateGroupPage();
+});
+
+changePasswordBtn?.addEventListener('click', () => {
+  changePasswordForm.classList.toggle('hidden');
+  if (!changePasswordForm.classList.contains('hidden')) currentPasswordInput.focus();
+});
+
+cancelChangePasswordBtn?.addEventListener('click', () => {
+  changePasswordForm.classList.add('hidden');
+  changePasswordForm.reset();
+});
+
+changePasswordForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const currentPassword = currentPasswordInput.value;
+  const newPassword = newPasswordInput.value;
+  const confirmPassword = confirmPasswordInput.value;
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    toast('请完整填写密码信息', true);
+    return;
+  }
+  if (newPassword.length < 6) {
+    toast('新密码至少 6 位', true);
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    toast('两次输入的新密码不一致', true);
+    return;
+  }
+
+  try {
+    const data = await api('/api/me/password', {
+      method: 'PATCH',
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    toast(data.message);
+    changePasswordForm.reset();
+    changePasswordForm.classList.add('hidden');
+  } catch (error) {
+    toast(error.message, true);
+  }
 });
 
 editProfileBtn.addEventListener('click', () => {
