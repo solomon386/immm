@@ -17,7 +17,8 @@ const state = {
   contextFriendId: null,
   contextGroupId: null,
   contextMessageId: null,
-  editingMessageId: null
+  editingMessageId: null,
+  currentTab: 'chat'
 };
 
 const $ = selector => document.querySelector(selector);
@@ -68,6 +69,15 @@ const contextClearMessagesBtn = $('#contextClearMessagesBtn');
 const messageContextMenu = $('#messageContextMenu');
 const contextDeleteMessageBtn = $('#contextDeleteMessageBtn');
 const contextEditMessageBtn = $('#contextEditMessageBtn');
+const tabChat = $('#tabChat');
+const tabFriend = $('#tabFriend');
+const tabMe = $('#tabMe');
+const tabSettings = $('#tabSettings');
+const chatListView = $('#chatListView');
+const chatConversationView = $('#chatConversationView');
+const chatConversationList = $('#chatConversationList');
+const backToChatList = $('#backToChatList');
+const bottomNav = $('.bottom-nav');
 const rtcConfig = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
@@ -279,9 +289,32 @@ function setAvatar(el, user) {
   el.classList.remove('image-avatar');
 }
 
+function switchTab(tab) {
+  state.currentTab = tab;
+  [tabChat, tabFriend, tabMe, tabSettings].forEach(el => el.classList.add('hidden'));
+  if (tab === 'chat') {
+    tabChat.classList.remove('hidden');
+    if (state.selectedFriend) {
+      chatListView.classList.add('hidden');
+      chatConversationView.classList.remove('hidden');
+    } else {
+      chatListView.classList.remove('hidden');
+      chatConversationView.classList.add('hidden');
+      renderChatList();
+    }
+  }
+  if (tab === 'friend') tabFriend.classList.remove('hidden');
+  if (tab === 'me') tabMe.classList.remove('hidden');
+  if (tab === 'settings') tabSettings.classList.remove('hidden');
+  bottomNav.querySelectorAll('.nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+}
+
 function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
+  switchTab(state.currentTab);
   updateNotificationButton();
 }
 
@@ -306,6 +339,7 @@ function clearLocalUserData() {
   state.contextMessageId = null;
   state.editingMessageId = null;
   state.notificationPermissionRequested = false;
+  state.currentTab = 'chat';
   document.title = originalTitle;
 
   authForm.reset();
@@ -321,6 +355,9 @@ function clearLocalUserData() {
   searchResults.className = 'list compact';
   $('#searchInput').value = '';
   groupNameInput.value = '';
+  chatConversationView.classList.add('hidden');
+  chatListView.classList.remove('hidden');
+  renderChatList();
   renderFriends();
   renderGroupMembers();
   renderGroups();
@@ -363,6 +400,7 @@ async function loadMe() {
   $('#myUsername').textContent = `@${state.me.username}`;
   setAvatar($('#myAvatar'), state.me);
   profileDisplayName.value = state.me.displayName;
+  renderChatList();
   renderFriends();
   renderGroupMembers();
   renderGroups();
@@ -386,13 +424,11 @@ function connectSocket() {
       renderMessages();
       if (shouldNotify) {
         state.unreadFriendIds.add(conversationId);
-        renderFriends();
-        renderGroups();
+        renderChatList();
         notifyIncomingMessage(conversationId, message);
       } else if (isIncoming) {
         state.unreadFriendIds.delete(conversationId);
-        renderFriends();
-        renderGroups();
+        renderChatList();
         if (!isGroupMessage) markSelectedConversationRead();
       }
       return;
@@ -400,8 +436,7 @@ function connectSocket() {
 
     if (isIncoming) {
       state.unreadFriendIds.add(conversationId);
-      renderFriends();
-      renderGroups();
+      renderChatList();
       if (shouldNotify) {
         notifyIncomingMessage(conversationId, message);
       } else {
@@ -441,6 +476,7 @@ function connectSocket() {
     const friend = state.friends.find(item => item.id === userId);
     if (friend) friend.online = online;
     if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === userId) state.selectedFriend.online = online;
+    renderChatList();
     renderFriends();
     updateChatHeader();
   });
@@ -501,8 +537,7 @@ document.addEventListener('visibilitychange', () => {
     document.title = state.unreadFriendIds.size ? `(${state.unreadFriendIds.size}) ${originalTitle}` : originalTitle;
     if (state.selectedFriend && state.unreadFriendIds.has(selectedConversationKey())) {
       state.unreadFriendIds.delete(selectedConversationKey());
-      renderFriends();
-      renderGroups();
+      renderChatList();
       if (!state.selectedFriend.isGroup) markSelectedConversationRead();
     }
   }
@@ -514,6 +549,19 @@ notificationBtn?.addEventListener('click', () => {
 
 loginTab.addEventListener('click', () => setMode('login'));
 registerTab.addEventListener('click', () => setMode('register'));
+
+bottomNav?.addEventListener('click', event => {
+  const btn = event.target.closest('.nav-item');
+  if (!btn) return;
+  switchTab(btn.dataset.tab);
+});
+
+backToChatList?.addEventListener('click', () => {
+  chatConversationView.classList.add('hidden');
+  chatListView.classList.remove('hidden');
+  state.selectedFriend = null;
+  renderChatList();
+});
 
 editProfileBtn.addEventListener('click', () => {
   profileDisplayName.value = state.me?.displayName || '';
@@ -670,6 +718,7 @@ function syncUserProfile(user) {
     updateChatHeader();
   }
 
+  renderChatList();
   renderFriends();
   renderGroupMembers();
   renderGroups();
@@ -745,6 +794,7 @@ function handleFriendResponse(payload) {
   };
   state.friendResponses = [response, ...state.friendResponses.filter(item => item.requestId !== response.requestId)].slice(0, 5);
   renderFriendResponses();
+  renderChatList();
   renderFriends();
   toast(message, !response.accepted && response.role === 'requester');
 }
@@ -829,6 +879,39 @@ function renderGroups() {
     });
     item.addEventListener('click', () => selectGroup(group));
     groupList.appendChild(item);
+  });
+}
+
+function renderChatList() {
+  chatConversationList.innerHTML = '';
+  hideFriendContextMenu();
+  const allConversations = [
+    ...state.friends.map(f => ({ ...f, isGroup: false, sortKey: f.displayName })),
+    ...state.groupsx.map(g => ({ ...g, isGroup: true, sortKey: g.name }))
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+
+  if (!allConversations.length) {
+    chatConversationList.textContent = '暂无聊天';
+    chatConversationList.classList.add('empty');
+    return;
+  }
+  chatConversationList.classList.remove('empty');
+  allConversations.forEach(conv => {
+    const item = conv.isGroup ? groupItem(conv) : userItem(conv);
+    const key = conversationKey(conv);
+    item.classList.toggle('has-unread', state.unreadFriendIds.has(key));
+    item.classList.toggle('active', selectedConversationKey() === key);
+    item.title = '左键聊天，右键打开更多操作';
+    item.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      showFriendContextMenu(event, conv);
+    });
+    item.addEventListener('click', () => {
+      if (conv.isGroup) selectGroup(conv);
+      else selectFriend(conv);
+    });
+    chatConversationList.appendChild(item);
   });
 }
 
@@ -959,11 +1042,12 @@ function resetConversation(message = '请选择好友开始聊天', status = '�
   sendBtn.disabled = true;
   voiceCallBtn.disabled = true;
   videoCallBtn.disabled = true;
-  renderFriends();
-  renderGroups();
+  chatConversationView.classList.add('hidden');
+  chatListView.classList.remove('hidden');
+  renderChatList();
   $('#chatTitle').textContent = message;
   $('#chatStatus').textContent = status;
-  messagesEl.innerHTML = '<div class="welcome"><h3>请选择好友</h3><p>从左侧好友列表选择一个好友开始聊天。</p></div>';
+  messagesEl.innerHTML = '<div class="welcome"><h3>请选择好友</h3><p>从聊天列表选择一个好友或群聊开始聊天。</p></div>';
 }
 
 async function deleteFriend(friendId) {
@@ -1094,8 +1178,9 @@ async function selectFriend(friend) {
   voiceCallBtn.disabled = !state.callsEnabled || !friend.online;
   videoCallBtn.disabled = !state.callsEnabled || !friend.online;
   updateChatHeader();
-  renderFriends();
-  renderGroups();
+  chatListView.classList.add('hidden');
+  chatConversationView.classList.remove('hidden');
+  renderChatList();
   renderMessages();
   markSelectedConversationRead();
 }
@@ -1111,8 +1196,9 @@ async function selectGroup(group) {
   voiceCallBtn.disabled = true;
   videoCallBtn.disabled = true;
   updateChatHeader();
-  renderFriends();
-  renderGroups();
+  chatListView.classList.add('hidden');
+  chatConversationView.classList.remove('hidden');
+  renderChatList();
   renderMessages();
 }
 
@@ -1219,8 +1305,7 @@ async function handleMessageEdited(payload) {
   if (!isCurrentConversation) {
     if (editedMessage.from !== state.me.id) {
       state.unreadFriendIds.add(conversationId);
-      renderFriends();
-      renderGroups();
+      renderChatList();
       toast(isGroupMessage ? '群成员更新了一条消息' : '好友更新了一条消息');
     }
     return;

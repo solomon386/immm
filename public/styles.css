@@ -165,18 +165,166 @@ input:focus {
   background: #fff1f2;
 }
 
-#notificationBtn.enabled {
-  color: #047857;
-  border-color: #bbf7d0;
-  background: #ecfdf5;
+/* ===== 主应用布局 ===== */
+.chat-app {
+  width: min(1220px, 100%);
+  height: min(820px, calc(100vh - 56px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  border-radius: 30px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
 }
 
-#notificationBtn.blocked {
+.app-header {
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  flex-shrink: 0;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--brand-dark);
+}
+
+.main-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.tab-pane {
+  min-height: 100%;
+}
+
+.pane-view {
+  min-height: 100%;
+  padding: 16px 20px;
+}
+
+.section-header {
+  margin-bottom: 16px;
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--brand-dark);
+}
+
+/* ===== 底部导航 ===== */
+.bottom-nav {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px 12px 10px;
+  border-top: 1px solid var(--line);
+  background: rgba(248, 250, 252, 0.92);
+  flex-shrink: 0;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border-radius: 14px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.nav-item .nav-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.nav-item .nav-label {
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.nav-item.active {
+  color: var(--brand);
+  background: rgba(79, 70, 229, 0.08);
+}
+
+/* ===== 个人资料卡片 ===== */
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 20px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  text-align: center;
+}
+
+.profile-card .avatar.large {
+  width: 80px;
+  height: 80px;
+  border-radius: 26px;
+  font-size: 28px;
+}
+
+.profile-card h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.profile-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* ===== 设置列表 ===== */
+.settings-list {
+  display: grid;
+  gap: 10px;
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.setting-item .setting-info {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.setting-item .setting-info strong {
+  font-size: 15px;
+}
+
+.setting-item .setting-info span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.setting-item.danger .setting-info strong {
   color: var(--danger);
-  border-color: #fecaca;
-  background: #fff1f2;
 }
 
+/* ===== 原有组件样式（保留） ===== */
 .chat-shell {
   width: min(1220px, 100%);
   height: min(820px, calc(100vh - 56px));
@@ -307,6 +455,12 @@ input:focus {
 .panel h2 {
   margin-bottom: 12px;
   font-size: 16px;
+}
+
+.panel h3 {
+  margin-bottom: 10px;
+  font-size: 15px;
+  color: var(--text);
 }
 
 .friends-panel {
@@ -492,6 +646,7 @@ input:focus {
   background: var(--success);
 }
 
+/* ===== 会话区域 ===== */
 .conversation {
   min-width: 0;
   min-height: 0;
@@ -504,13 +659,26 @@ input:focus {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 22px 26px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.76);
 }
 
+.conversation-header .back-btn {
+  padding: 8px 14px;
+  font-size: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.conversation-header .header-center {
+  min-width: 0;
+  flex: 1;
+}
+
 .conversation-header h2 {
   margin-bottom: 4px;
+  font-size: 18px;
 }
 
 .call-actions {
@@ -642,6 +810,7 @@ input:focus {
   color: var(--brand-dark);
 }
 
+/* ===== 通话遮罩 ===== */
 .call-overlay {
   position: fixed;
   inset: 0;
@@ -764,37 +933,39 @@ input:focus {
   background: #111827;
 }
 
+/* ===== 通知按钮状态 ===== */
+#notificationBtn.enabled {
+  color: #047857;
+  border-color: #bbf7d0;
+  background: #ecfdf5;
+}
+
+#notificationBtn.blocked {
+  color: var(--danger);
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+/* ===== 响应式 ===== */
 @media (max-width: 860px) {
   .app {
     padding: 0;
     place-items: stretch;
   }
 
-  .chat-shell {
+  .chat-app {
     width: 100%;
     height: 100dvh;
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(260px, 42dvh) minmax(0, 1fr);
     border-radius: 0;
+    border: 0;
   }
 
-  .sidebar {
-    min-height: 0;
-    overflow: auto;
-    padding: 14px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+  .pane-view {
+    padding: 12px 14px;
   }
 
-  .profile {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto auto;
-    gap: 8px;
-  }
-
-  .profile .avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 14px;
+  .section-header h2 {
+    font-size: 18px;
   }
 
   .panel {
@@ -806,8 +977,28 @@ input:focus {
     max-height: 180px;
   }
 
+  .profile-card {
+    padding: 20px 16px;
+  }
+
+  .profile-card .avatar.large {
+    width: 64px;
+    height: 64px;
+    border-radius: 22px;
+    font-size: 22px;
+  }
+
   .conversation {
     min-height: 0;
+  }
+
+  .conversation-header {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .conversation-header h2 {
+    font-size: 16px;
   }
 
   .composer {
@@ -824,26 +1015,6 @@ input:focus {
   .composer button {
     padding: 11px 12px;
     white-space: nowrap;
-  }
-
-  .conversation-header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-  }
-
-  .conversation-header h2 {
-    font-size: 18px;
-  }
-
-  #chatStatus,
-  .conversation-header p {
-    display: none;
-  }
-
-  .call-actions {
-    display: none;
   }
 
   .messages {
@@ -881,6 +1052,15 @@ input:focus {
     font-size: 12px;
   }
 
+  .call-actions {
+    display: none;
+  }
+
+  #chatStatus,
+  .conversation-header p {
+    display: none;
+  }
+
   .video-grid,
   .video-box video {
     min-height: 58dvh;
@@ -907,56 +1087,20 @@ input:focus {
     font-size: 28px;
   }
 
-  .chat-shell {
-    grid-template-rows: minmax(230px, 38dvh) minmax(0, 1fr);
+  .app-header h1 {
+    font-size: 16px;
   }
 
-  .sidebar {
-    gap: 10px;
-    padding: 10px;
+  .bottom-nav {
+    padding: 4px 8px 8px;
   }
 
-  .profile {
-    grid-template-columns: 40px minmax(0, 1fr) auto;
+  .nav-item .nav-icon {
+    font-size: 20px;
   }
 
-  .profile .avatar {
-    width: 40px;
-    height: 40px;
-  }
-
-  .profile #logoutBtn {
-    grid-column: 3;
-  }
-
-  .profile #editProfileBtn {
-    grid-column: 3;
-    grid-row: 2;
-  }
-
-  .profile #notificationBtn {
-    grid-column: 3;
-    grid-row: 3;
-  }
-
-  .profile-editor {
-    padding: 12px;
-  }
-
-  .profile-avatar-field {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .profile-avatar-field > span {
-    grid-column: 1 / -1;
-  }
-
-  .profile-avatar-field small {
-    font-size: 12px;
-  }
-
-  .search-row {
-    grid-template-columns: 1fr;
+  .nav-item .nav-label {
+    font-size: 10px;
   }
 
   .user-item {
@@ -968,14 +1112,6 @@ input:focus {
     width: 34px;
     height: 34px;
     border-radius: 11px;
-  }
-
-  .conversation-header {
-    padding: 12px;
-  }
-
-  .call-actions {
-    display: none;
   }
 
   .call-btn {
