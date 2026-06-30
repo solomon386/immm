@@ -603,14 +603,16 @@ app.get('/api/config', (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   const { username, password, displayName } = req.body;
-  if (!username || !password) return res.status(400).json({ message: '用户名和密码不能为空' });
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  const normalizedDisplayName = String(displayName || '').trim();
+  if (!normalizedUsername || !password) return res.status(400).json({ message: '用户名和密码不能为空' });
   if (password.length < 6) return res.status(400).json({ message: '密码至少 6 位' });
-  if (db.users.some(user => user.username === username)) return res.status(409).json({ message: '用户名已存在' });
+  if (db.users.some(user => user.username.toLowerCase() === normalizedUsername)) return res.status(409).json({ message: '用户名已存在' });
 
   const user = {
     id: uuid(),
-    username,
-    displayName: displayName || username,
+    username: normalizedUsername,
+    displayName: normalizedDisplayName || normalizedUsername,
     passwordHash: await bcrypt.hash(password, 10),
     avatarColor: `hsl(${Math.floor(Math.random() * 360)}, 70%, 55%)`,
     createdAt: new Date().toISOString()
@@ -640,7 +642,8 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = db.users.find(item => item.username === username);
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  const user = db.users.find(item => item.username.toLowerCase() === normalizedUsername);
   if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) {
     return res.status(401).json({ message: '用户名或密码错误' });
   }
