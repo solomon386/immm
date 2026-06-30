@@ -1407,13 +1407,17 @@ function updateChatHeader() {
   if (!state.selectedFriend) return;
   if (state.selectedFriend.isGroup) {
     $('#chatTitle').textContent = state.selectedFriend.name;
-    $('#chatStatus').textContent = `${state.selectedFriend.memberCount || state.selectedFriend.members?.length || 0} 人群聊 · 群聊暂不支持语音或视频通话`;
+    $('#chatStatus').textContent = `${state.selectedFriend.memberCount || state.selectedFriend.members?.length || 0} 人群聊`;
     groupMembersBtn.classList.remove('hidden');
+    voiceCallBtn.classList.add('hidden');
+    videoCallBtn.classList.add('hidden');
     voiceCallBtn.disabled = true;
     videoCallBtn.disabled = true;
     return;
   }
   groupMembersBtn.classList.add('hidden');
+  voiceCallBtn.classList.remove('hidden');
+  videoCallBtn.classList.remove('hidden');
   $('#chatTitle').textContent = state.selectedFriend.displayName;
   $('#chatStatus').textContent = state.selectedFriend.online
     ? (state.callsEnabled ? '在线，可发起语音或视频通话' : '在线')
@@ -1694,10 +1698,7 @@ function startVideoCall() {
 
 async function startMediaCall(type) {
   if (!state.selectedFriend || state.call) return;
-  if (state.selectedFriend.isGroup) {
-    toast('群聊暂不支持语音或视频通话', true);
-    return;
-  }
+  if (state.selectedFriend.isGroup) return;
   if (!state.callsEnabled) {
     toast('语音和视频聊天功能已关闭', true);
     return;
