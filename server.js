@@ -21,6 +21,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PRODUCTION = NODE_ENV === 'production';
 const IS_TEST = NODE_ENV === 'test';
 const CALLS_ENABLED = process.env.ENABLE_CALLS === 'true';
+const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 const DEFAULT_MESSAGE_RETENTION_SECONDS = IS_PRODUCTION ? 24 * 60 * 60 : 60;
 const MESSAGE_RETENTION_MS = Number(process.env.MESSAGE_RETENTION_SECONDS || DEFAULT_MESSAGE_RETENTION_SECONDS) * 1000;
 const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
@@ -62,6 +63,7 @@ function dbSummary(snapshot = db) {
 }
 
 function logOperation(level, action, detail = {}) {
+  if (!shouldWriteLog(level)) return;
   const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info;
   logger(`[app] ${action}`, {
     environment: NODE_ENV,
@@ -353,8 +355,38 @@ function buildLogEntry(entry) {
   };
 }
 
+function logLevelValue(level = 'info') {
+  const values = {
+    debug: 10,
+    info: 20,
+    warn: 30,
+    error: 40
+  };
+  return values[level] || values.info;
+}
+
+function shouldWriteLog(level = 'info') {
+  return logLevelValue(level) >= logLevelValue(LOG_LEVEL);
+}
+
+function writeProductionConsoleLog(entry) {
+  if (!shouldWriteLog(entry.level)) return;
+  const logEntry = buildLogEntry(entry);
+  const output = serializeLogEntry(logEntry);
+  if (entry.level === 'error') {
+    console.error(output);
+    return;
+  }
+  if (entry.level === 'warn') {
+    console.warn(output);
+    return;
+  }
+  console.log(output);
+}
+
 function writeProductionLog(entry) {
   if (IS_TEST) return;
+  if (!shouldWriteLog(entry.level)) return;
   if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
   fs.appendFile(logFilePath(), `${serializeLogEntry(buildLogEntry(entry))}\n`, error => {
     if (error) console.error('[logger] 写入日志失败', error.message);
@@ -370,6 +402,7 @@ function statusColor(statusCode) {
 
 function writeDevelopmentLog(entry) {
   if (IS_TEST) return;
+  if (!shouldWriteLog(entry.level)) return;
   const reset = '\x1b[0m';
   const color = statusColor(entry.statusCode);
   const logEntry = buildLogEntry(entry);
@@ -379,6 +412,7 @@ function writeDevelopmentLog(entry) {
 
 function logWebRequest(entry) {
   if (IS_PRODUCTION) {
+    writeProductionConsoleLog(entry);
     writeProductionLog(entry);
     return;
   }

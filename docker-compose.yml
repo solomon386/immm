@@ -12,6 +12,7 @@ services:
       NODE_ENV: ${APP_ENV:-production}
       PORT: ${APP_PORT:-3000}
       JWT_SECRET: ${JWT_SECRET:-please-change-this-secret}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-web_im}
@@ -50,6 +51,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       NODE_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-web_im}

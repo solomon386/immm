@@ -89,6 +89,7 @@ http://localhost:8080
 ```text
 APP_ENV=production
 NODE_ENV=production
+LOG_LEVEL=info
 MYSQL_HOST=mysql
 REDIS_URL=redis://redis:6379
 ```
@@ -106,6 +107,7 @@ NGINX_UPLOAD_CACHE_CONTROL=no-cache
 
 ```text
 APP_ENV=production
+LOG_LEVEL=info
 MESSAGE_RETENTION_SECONDS=86400
 NGINX_HTTP_PORT=80
 NGINX_SERVER_NAME=chat.example.com
@@ -223,4 +225,3 @@ docker compose up -d --force-recreate [service_name]
 docker compose up -d --force-recreate app
 docker compose up -d --force-recreate media-cleanup
 ```
-
