@@ -86,8 +86,13 @@ const tabFriend = $('#tabFriend');
 const tabMe = $('#tabMe');
 const tabSettings = $('#tabSettings');
 const chatListView = $('#chatListView');
+const createGroupView = $('#createGroupView');
 const chatConversationView = $('#chatConversationView');
 const chatConversationList = $('#chatConversationList');
+const chatAddBtn = $('#chatAddBtn');
+const chatAddMenu = $('#chatAddMenu');
+const openCreateGroupBtn = $('#openCreateGroupBtn');
+const backToChatFromCreateGroup = $('#backToChatFromCreateGroup');
 const backToChatList = $('#backToChatList');
 const bottomNav = $('.bottom-nav');
 const rtcConfig = {
@@ -308,9 +313,11 @@ function switchTab(tab) {
     tabChat.classList.remove('hidden');
     if (state.selectedFriend) {
       chatListView.classList.add('hidden');
+      createGroupView.classList.add('hidden');
       chatConversationView.classList.remove('hidden');
     } else {
       chatListView.classList.remove('hidden');
+      createGroupView.classList.add('hidden');
       chatConversationView.classList.add('hidden');
       renderChatList();
     }
@@ -368,6 +375,7 @@ function clearLocalUserData() {
   searchResults.className = 'list compact';
   $('#searchInput').value = '';
   groupNameInput.value = '';
+  createGroupView.classList.add('hidden');
   chatConversationView.classList.add('hidden');
   chatListView.classList.remove('hidden');
   renderChatList();
@@ -377,6 +385,7 @@ function clearLocalUserData() {
   renderRequests();
   renderFriendResponses();
   hideFriendContextMenu();
+  hideChatAddMenu();
   hideMessageContextMenu();
   resetConversation();
 }
@@ -567,14 +576,30 @@ registerTab.addEventListener('click', () => setMode('register'));
 bottomNav?.addEventListener('click', event => {
   const btn = event.target.closest('.nav-item');
   if (!btn) return;
+  hideChatAddMenu();
   switchTab(btn.dataset.tab);
 });
 
 backToChatList?.addEventListener('click', () => {
   chatConversationView.classList.add('hidden');
+  createGroupView.classList.add('hidden');
   chatListView.classList.remove('hidden');
   state.selectedFriend = null;
   renderChatList();
+});
+
+chatAddBtn?.addEventListener('click', event => {
+  event.stopPropagation();
+  chatAddMenu.classList.toggle('hidden');
+});
+
+openCreateGroupBtn?.addEventListener('click', () => {
+  hideChatAddMenu();
+  openCreateGroupPage();
+});
+
+backToChatFromCreateGroup?.addEventListener('click', () => {
+  closeCreateGroupPage();
 });
 
 editProfileBtn.addEventListener('click', () => {
@@ -707,8 +732,33 @@ function conversationKey(conversation) {
   return conversation.isGroup ? `group:${conversation.id}` : conversation.id;
 }
 
+function hideChatAddMenu() {
+  chatAddMenu?.classList.add('hidden');
+}
+
+function openCreateGroupPage() {
+  state.selectedFriend = null;
+  resetMessageEditor();
+  messageInput.disabled = true;
+  fileInput.disabled = true;
+  sendBtn.disabled = true;
+  chatConversationView.classList.add('hidden');
+  chatListView.classList.add('hidden');
+  createGroupView.classList.remove('hidden');
+  groupNameInput.focus();
+  renderGroupMembers();
+}
+
+function closeCreateGroupPage() {
+  createGroupView.classList.add('hidden');
+  chatConversationView.classList.add('hidden');
+  chatListView.classList.remove('hidden');
+  renderChatList();
+}
+
 async function openConversationFromFriendTab(conversation) {
   hideFriendContextMenu();
+  hideChatAddMenu();
   const key = conversationKey(conversation);
   state.deletedConversations.delete(key);
   switchTab('chat');
@@ -919,8 +969,13 @@ function renderChatList() {
     return;
   }
   chatConversationList.classList.remove('empty');
-  allConversations
-    .filter(conv => !state.deletedConversations.has(conversationKey(conv)))
+  const visibleConversations = allConversations.filter(conv => !state.deletedConversations.has(conversationKey(conv)));
+  if (!visibleConversations.length) {
+    chatConversationList.textContent = '暂无聊天';
+    chatConversationList.classList.add('empty');
+    return;
+  }
+  visibleConversations
     .forEach(conv => {
       const item = conv.isGroup ? groupItem(conv) : userItem(conv);
       const key = conversationKey(conv);
@@ -970,6 +1025,7 @@ async function createGroup() {
       item.checked = false;
     });
     await loadMe();
+    closeCreateGroupPage();
   } catch (error) {
     toast(error.message, true);
   }
@@ -1190,6 +1246,7 @@ contextEditMessageBtn.addEventListener('click', () => {
 });
 
 document.addEventListener('click', event => {
+  if (!chatAddMenu?.contains(event.target) && event.target !== chatAddBtn) hideChatAddMenu();
   if (!friendContextMenu.contains(event.target)) hideFriendContextMenu();
   if (!chatContextMenu.contains(event.target)) hideChatContextMenu();
   if (!messageContextMenu.contains(event.target)) hideMessageContextMenu();
@@ -1197,6 +1254,7 @@ document.addEventListener('click', event => {
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
+    hideChatAddMenu();
     hideFriendContextMenu();
     hideChatContextMenu();
     hideMessageContextMenu();
@@ -1210,6 +1268,7 @@ document.addEventListener('keydown', event => {
 });
 
 window.addEventListener('scroll', () => {
+  hideChatAddMenu();
   hideFriendContextMenu();
   hideChatContextMenu();
   hideMessageContextMenu();
@@ -1228,6 +1287,7 @@ function resetConversation(message = '请选择好友开始聊天', status = '�
   groupMembersBtn.classList.add('hidden');
   closeGroupMemberModal();
   chatConversationView.classList.add('hidden');
+  createGroupView.classList.add('hidden');
   chatListView.classList.remove('hidden');
   renderChatList();
   $('#chatTitle').textContent = message;
@@ -1380,6 +1440,7 @@ async function selectFriend(friend) {
   videoCallBtn.disabled = !state.callsEnabled || !friend.online;
   updateChatHeader();
   chatListView.classList.add('hidden');
+  createGroupView.classList.add('hidden');
   chatConversationView.classList.remove('hidden');
   renderChatList();
   renderMessages();
@@ -1398,6 +1459,7 @@ async function selectGroup(group) {
   videoCallBtn.disabled = true;
   updateChatHeader();
   chatListView.classList.add('hidden');
+  createGroupView.classList.add('hidden');
   chatConversationView.classList.remove('hidden');
   renderChatList();
   renderMessages();

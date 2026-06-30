@@ -54,10 +54,37 @@
           <div id="tabChat" class="tab-pane">
             <!-- 聊天列表视图 -->
             <div id="chatListView" class="pane-view">
-              <div class="section-header">
+              <div class="section-header chat-list-header">
                 <h2>聊天</h2>
+                <div class="chat-add-wrap">
+                  <button id="chatAddBtn" class="chat-add-btn" type="button" aria-label="更多操作">+</button>
+                  <div id="chatAddMenu" class="chat-add-menu hidden">
+                    <button id="openCreateGroupBtn" type="button">创建群聊</button>
+                  </div>
+                </div>
               </div>
               <div id="chatConversationList" class="list empty">暂无聊天</div>
+            </div>
+            <!-- 创建群聊独立页面 -->
+            <div id="createGroupView" class="pane-view hidden">
+              <div class="create-group-page">
+                <header class="subpage-header">
+                  <button id="backToChatFromCreateGroup" class="ghost back-btn" type="button">返回</button>
+                  <div>
+                    <h2>创建群聊</h2>
+                    <p>选择好友后创建新的群聊会话</p>
+                  </div>
+                </header>
+                <div class="panel create-group-panel">
+                  <label>
+                    群聊名称
+                    <input id="groupNameInput" placeholder="输入群聊名称" />
+                  </label>
+                  <h3>选择群成员</h3>
+                  <div id="groupMemberList" class="list compact empty">暂无可选好友</div>
+                  <button id="createGroupBtn" class="primary" type="button">创建群聊</button>
+                </div>
+              </div>
             </div>
             <!-- 聊天会话视图（默认隐藏） -->
             <div id="chatConversationView" class="pane-view hidden">
@@ -120,10 +147,7 @@
               </div>
 
               <div class="panel">
-                <h3>群聊</h3>
-                <input id="groupNameInput" placeholder="输入群聊名称" />
-                <div id="groupMemberList" class="list compact empty">暂无可选好友</div>
-                <button id="createGroupBtn" class="primary" type="button">创建群聊</button>
+                <h3>群组管理</h3>
                 <div id="groupList" class="list compact empty">暂无群聊</div>
               </div>
             </div>
