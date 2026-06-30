@@ -19,7 +19,11 @@ const state = {
   contextMessageId: null,
   editingMessageId: null,
   currentTab: 'chat',
-  deletedConversations: new Set()
+  deletedConversations: new Set(),
+  tabBadges: {
+    chat: false,
+    friend: false
+  }
 };
 
 const $ = selector => document.querySelector(selector);
@@ -312,8 +316,26 @@ function setAvatar(el, user) {
   el.classList.remove('image-avatar');
 }
 
+function updateNavBadges() {
+  bottomNav?.querySelectorAll('.nav-item').forEach(btn => {
+    const tab = btn.dataset.tab;
+    btn.classList.toggle('has-badge', Boolean(state.tabBadges[tab]) && state.currentTab !== tab);
+  });
+}
+
+function markTabBadge(tab) {
+  if (state.currentTab === tab) {
+    state.tabBadges[tab] = false;
+    updateNavBadges();
+    return;
+  }
+  state.tabBadges[tab] = true;
+  updateNavBadges();
+}
+
 function switchTab(tab) {
   state.currentTab = tab;
+  if (state.tabBadges[tab]) state.tabBadges[tab] = false;
   [tabChat, tabFriend, tabMe, tabSettings].forEach(el => el.classList.add('hidden'));
   if (tab === 'chat') {
     tabChat.classList.remove('hidden');
@@ -334,6 +356,7 @@ function switchTab(tab) {
   bottomNav.querySelectorAll('.nav-item').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
+  updateNavBadges();
 }
 
 function showChat() {
@@ -366,6 +389,8 @@ function clearLocalUserData() {
   state.notificationPermissionRequested = false;
   state.currentTab = 'chat';
   state.deletedConversations.clear();
+  state.tabBadges.chat = false;
+  state.tabBadges.friend = false;
   document.title = originalTitle;
 
   authForm.reset();
@@ -452,6 +477,7 @@ function connectSocket() {
     if (isCurrentConversation) {
       if (!state.messages.some(item => item.id === message.id)) state.messages.push(message);
       renderMessages();
+      if (isIncoming) markTabBadge('chat');
       if (shouldNotify) {
         state.unreadFriendIds.add(conversationId);
         renderChatList();
@@ -466,6 +492,7 @@ function connectSocket() {
 
     if (isIncoming) {
       state.unreadFriendIds.add(conversationId);
+      markTabBadge('chat');
       renderChatList();
       if (shouldNotify) {
         notifyIncomingMessage(conversationId, message);
@@ -481,6 +508,7 @@ function connectSocket() {
   state.socket.on('message:error', payload => toast(payload.message, true));
   state.socket.on('friend:request', async () => {
     await loadMe();
+    markTabBadge('friend');
     toast('收到新的好友请求');
   });
   state.socket.on('friend:updated', async payload => {

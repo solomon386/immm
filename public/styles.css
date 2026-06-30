@@ -368,6 +368,7 @@ input:focus {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -394,6 +395,19 @@ input:focus {
 .nav-item.active {
   color: var(--brand);
   background: rgba(79, 70, 229, 0.08);
+}
+
+.nav-item.has-badge::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: calc(50% - 18px);
+  width: 9px;
+  height: 9px;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
 }
 
 /* ===== 个人资料卡片 ===== */
