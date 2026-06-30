@@ -3,6 +3,7 @@ const state = {
   token: localStorage.getItem('token'),
   me: null,
   friends: [],
+  groups: [],
   requests: [],
   selectedFriend: null,
   messages: [],
@@ -14,6 +15,7 @@ const state = {
   notificationPermissionRequested: false,
   audioContext: null,
   contextFriendId: null,
+  contextGroupId: null,
   contextMessageId: null,
   editingMessageId: null
 };
@@ -36,6 +38,10 @@ const profileAvatarButton = $('#profileAvatarButton');
 const profileAvatarFilename = $('#profileAvatarFilename');
 const cancelProfileBtn = $('#cancelProfileBtn');
 const friendList = $('#friendList');
+const groupNameInput = $('#groupNameInput');
+const createGroupBtn = $('#createGroupBtn');
+const groupMemberList = $('#groupMemberList');
+const groupList = $('#groupList');
 const requestList = $('#requestList');
 const searchResults = $('#searchResults');
 const friendResponseList = $('#friendResponseList');
@@ -194,7 +200,7 @@ function updateNotificationButton() {
 
 function flashDocumentTitle(friend, message) {
   const unreadCount = state.unreadFriendIds.size;
-  const sender = friend?.displayName || friend?.username || '好友';
+  const sender = friend?.name || friend?.displayName || friend?.username || '好友';
   document.title = `(${unreadCount}) ${sender}: ${messagePreview(message)}`;
   if (titleFlashTimer) clearTimeout(titleFlashTimer);
   titleFlashTimer = setTimeout(() => {
@@ -204,20 +210,26 @@ function flashDocumentTitle(friend, message) {
 
 function showBrowserMessageNotification(friend, message) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  const notification = new Notification(`来自 ${friend?.displayName || friend?.username || '好友'} 的新消息`, {
+  const title = friend?.isGroup
+    ? `群聊「${friend.name}」有新消息`
+    : `来自 ${friend?.displayName || friend?.username || '好友'} 的新消息`;
+  const notification = new Notification(title, {
     body: messagePreview(message),
     tag: `message:${message.id}`,
     renotify: false
   });
   notification.onclick = () => {
     window.focus();
-    if (friend) selectFriend(friend);
+    if (friend?.isGroup) selectGroup(friend);
+    else if (friend) selectFriend(friend);
     notification.close();
   };
 }
 
-function notifyIncomingMessage(friendId, message) {
-  const friend = state.friends.find(item => item.id === friendId);
+function notifyIncomingMessage(conversationId, message) {
+  const friend = conversationId.startsWith('group:')
+    ? { ...state.groups.find(item => item.id === conversationId.slice(6)), isGroup: true }
+    : state.friends.find(item => item.id === conversationId);
   playMessageSound();
   showBrowserMessageNotification(friend, message);
   flashDocumentTitle(friend, message);
@@ -283,12 +295,14 @@ function clearLocalUserData() {
   state.token = null;
   state.me = null;
   state.friends = [];
+  state.groups = [];
   state.requests = [];
   state.selectedFriend = null;
   state.messages = [];
   state.unreadFriendIds.clear();
   state.friendResponses = [];
   state.contextFriendId = null;
+  state.contextGroupId = null;
   state.contextMessageId = null;
   state.editingMessageId = null;
   state.notificationPermissionRequested = false;
@@ -306,7 +320,10 @@ function clearLocalUserData() {
   searchResults.innerHTML = '';
   searchResults.className = 'list compact';
   $('#searchInput').value = '';
+  groupNameInput.value = '';
   renderFriends();
+  renderGroupMembers();
+  renderGroups();
   renderRequests();
   renderFriendResponses();
   hideFriendContextMenu();
@@ -340,12 +357,15 @@ async function loadMe() {
   const data = await api('/api/me');
   state.me = data.user;
   state.friends = data.friends;
+  state.groups = data.groups || [];
   state.requests = data.requests;
   $('#myName').textContent = state.me.displayName;
   $('#myUsername').textContent = `@${state.me.username}`;
   setAvatar($('#myAvatar'), state.me);
   profileDisplayName.value = state.me.displayName;
   renderFriends();
+  renderGroupMembers();
+  renderGroups();
   renderRequests();
   renderFriendResponses();
 }
@@ -355,33 +375,37 @@ function connectSocket() {
   state.socket = io({ auth: { token: state.token } });
 
   state.socket.on('message:new', message => {
-    const friendId = message.from === state.me.id ? message.to : message.from;
-    const isCurrentConversation = state.selectedFriend?.id === friendId;
-    const isIncoming = message.to === state.me.id;
+    const isGroupMessage = Boolean(message.groupId);
+    const conversationId = isGroupMessage ? `group:${message.groupId}` : (message.from === state.me.id ? message.to : message.from);
+    const isCurrentConversation = selectedConversationKey() === conversationId;
+    const isIncoming = message.from !== state.me.id;
     const shouldNotify = isIncoming && isPageInactive();
 
     if (isCurrentConversation) {
       if (!state.messages.some(item => item.id === message.id)) state.messages.push(message);
       renderMessages();
       if (shouldNotify) {
-        state.unreadFriendIds.add(friendId);
+        state.unreadFriendIds.add(conversationId);
         renderFriends();
-        notifyIncomingMessage(friendId, message);
+        renderGroups();
+        notifyIncomingMessage(conversationId, message);
       } else if (isIncoming) {
-        state.unreadFriendIds.delete(friendId);
+        state.unreadFriendIds.delete(conversationId);
         renderFriends();
-        markSelectedConversationRead();
+        renderGroups();
+        if (!isGroupMessage) markSelectedConversationRead();
       }
       return;
     }
 
     if (isIncoming) {
-      state.unreadFriendIds.add(friendId);
+      state.unreadFriendIds.add(conversationId);
       renderFriends();
+      renderGroups();
       if (shouldNotify) {
-        notifyIncomingMessage(friendId, message);
+        notifyIncomingMessage(conversationId, message);
       } else {
-        toast('收到新的好友消息');
+        toast(isGroupMessage ? '收到新的群聊消息' : '收到新的好友消息');
       }
     }
   });
@@ -400,6 +424,9 @@ function connectSocket() {
   });
   state.socket.on('friend:removed', handleFriendRemoved);
   state.socket.on('conversation:cleared', handleConversationCleared);
+  state.socket.on('group:updated', handleGroupUpdated);
+  state.socket.on('group:dissolved', handleGroupDissolved);
+  state.socket.on('group:messages-cleared', handleGroupMessagesCleared);
   state.socket.on('profile:updated', payload => {
     state.me = payload.user;
     $('#myName').textContent = state.me.displayName;
@@ -409,7 +436,7 @@ function connectSocket() {
   state.socket.on('friend:profile-updated', payload => {
     const friend = state.friends.find(item => item.id === payload.user.id);
     if (friend) Object.assign(friend, payload.user);
-    if (state.selectedFriend?.id === payload.user.id) {
+    if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === payload.user.id) {
       state.selectedFriend = { ...state.selectedFriend, ...payload.user };
       updateChatHeader();
     }
@@ -419,7 +446,7 @@ function connectSocket() {
   state.socket.on('presence:update', ({ userId, online }) => {
     const friend = state.friends.find(item => item.id === userId);
     if (friend) friend.online = online;
-    if (state.selectedFriend?.id === userId) state.selectedFriend.online = online;
+    if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === userId) state.selectedFriend.online = online;
     renderFriends();
     updateChatHeader();
   });
@@ -478,10 +505,11 @@ document.addEventListener('pointerdown', () => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     document.title = state.unreadFriendIds.size ? `(${state.unreadFriendIds.size}) ${originalTitle}` : originalTitle;
-    if (state.selectedFriend && state.unreadFriendIds.has(state.selectedFriend.id)) {
-      state.unreadFriendIds.delete(state.selectedFriend.id);
+    if (state.selectedFriend && state.unreadFriendIds.has(selectedConversationKey())) {
+      state.unreadFriendIds.delete(selectedConversationKey());
       renderFriends();
-      markSelectedConversationRead();
+      renderGroups();
+      if (!state.selectedFriend.isGroup) markSelectedConversationRead();
     }
   }
 });
@@ -617,6 +645,34 @@ function userItem(user) {
   return item;
 }
 
+function conversationKey(conversation) {
+  if (!conversation) return '';
+  return conversation.isGroup ? `group:${conversation.id}` : conversation.id;
+}
+
+function selectedConversationKey() {
+  return conversationKey(state.selectedFriend);
+}
+
+function groupItem(group) {
+  const item = document.createElement('div');
+  item.className = 'user-item group-item';
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar small';
+  avatar.textContent = '群';
+  const meta = document.createElement('div');
+  meta.className = 'user-meta';
+  const strong = document.createElement('strong');
+  strong.textContent = group.name;
+  const span = document.createElement('span');
+  span.textContent = `${group.memberCount || group.members?.length || 0} 人 · ${group.ownerId === state.me?.id ? '我是群主' : '群聊'}`;
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  meta.append(strong, span);
+  item.append(avatar, meta, actions);
+  return item;
+}
+
 function renderRequests() {
   requestList.innerHTML = '';
   if (!state.requests.length) {
@@ -702,15 +758,95 @@ function renderFriends() {
       event.stopPropagation();
       showFriendContextMenu(event, friend);
     });
-    item.classList.toggle('active', state.selectedFriend?.id === friend.id);
+    item.classList.toggle('active', !state.selectedFriend?.isGroup && state.selectedFriend?.id === friend.id);
     item.addEventListener('click', () => selectFriend(friend));
     friendList.appendChild(item);
   });
 }
 
+function renderGroupMembers() {
+  groupMemberList.innerHTML = '';
+  if (!state.friends.length) {
+    groupMemberList.textContent = '暂无可选好友';
+    groupMemberList.classList.add('empty');
+    return;
+  }
+  groupMemberList.classList.remove('empty');
+  state.friends.forEach(friend => {
+    const label = document.createElement('label');
+    label.className = 'group-member-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = friend.id;
+    const span = document.createElement('span');
+    span.textContent = `${friend.displayName}（@${friend.username}）`;
+    label.append(checkbox, span);
+    groupMemberList.appendChild(label);
+  });
+}
+
+function renderGroups() {
+  groupList.innerHTML = '';
+  hideFriendContextMenu();
+  if (!state.groups.length) {
+    groupList.textContent = '暂无群聊';
+    groupList.classList.add('empty');
+    return;
+  }
+  groupList.classList.remove('empty');
+  state.groups.forEach(group => {
+    const conversation = { ...group, isGroup: true };
+    const item = groupItem(group);
+    item.classList.toggle('has-unread', state.unreadFriendIds.has(conversationKey(conversation)));
+    item.classList.toggle('active', selectedConversationKey() === conversationKey(conversation));
+    item.title = '左键聊天，右键打开更多操作';
+    item.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      showFriendContextMenu(event, conversation);
+    });
+    item.addEventListener('click', () => selectGroup(group));
+    groupList.appendChild(item);
+  });
+}
+
+createGroupBtn?.addEventListener('click', createGroup);
+
+async function createGroup() {
+  const name = groupNameInput.value.trim();
+  const memberIds = [...groupMemberList.querySelectorAll('input[type="checkbox"]:checked')].map(item => item.value);
+  if (!name) {
+    toast('请输入群聊名称', true);
+    return;
+  }
+  if (!memberIds.length) {
+    toast('请至少选择 1 位好友', true);
+    return;
+  }
+  try {
+    const data = await api('/api/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name, memberIds })
+    });
+    toast(data.message);
+    groupNameInput.value = '';
+    groupMemberList.querySelectorAll('input[type="checkbox"]').forEach(item => {
+      item.checked = false;
+    });
+    await loadMe();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function showFriendContextMenu(event, friend) {
   hideMessageContextMenu();
-  state.contextFriendId = friend.id;
+  state.contextFriendId = friend.isGroup ? null : friend.id;
+  state.contextGroupId = friend.isGroup ? friend.id : null;
+  contextDeleteFriendBtn.textContent = friend.isGroup ? '解散群聊' : '删除好友';
+  contextDeleteFriendBtn.disabled = friend.isGroup && friend.ownerId !== state.me?.id;
+  contextDeleteFriendBtn.title = contextDeleteFriendBtn.disabled ? '只有群主可以解散群聊' : '';
+  contextClearMessagesBtn.textContent = friend.isGroup ? '清空群聊记录' : '清空聊天记录';
   friendContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
   friendContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
   friendContextMenu.classList.remove('hidden');
@@ -718,6 +854,11 @@ function showFriendContextMenu(event, friend) {
 
 function hideFriendContextMenu() {
   state.contextFriendId = null;
+  state.contextGroupId = null;
+  contextDeleteFriendBtn.textContent = '删除好友';
+  contextDeleteFriendBtn.disabled = false;
+  contextDeleteFriendBtn.title = '';
+  contextClearMessagesBtn.textContent = '清空聊天记录';
   friendContextMenu?.classList.add('hidden');
 }
 
@@ -738,13 +879,17 @@ function hideMessageContextMenu() {
 
 contextDeleteFriendBtn.addEventListener('click', () => {
   const friendId = state.contextFriendId;
+  const groupId = state.contextGroupId;
   hideFriendContextMenu();
+  if (groupId) dissolveGroup(groupId);
   if (friendId) deleteFriend(friendId);
 });
 
 contextClearMessagesBtn.addEventListener('click', () => {
   const friendId = state.contextFriendId;
+  const groupId = state.contextGroupId;
   hideFriendContextMenu();
+  if (groupId) clearGroupMessages(groupId);
   if (friendId) clearFriendMessages(friendId);
 });
 
@@ -792,6 +937,8 @@ function resetConversation(message = '请选择好友开始聊天', status = '�
   sendBtn.disabled = true;
   voiceCallBtn.disabled = true;
   videoCallBtn.disabled = true;
+  renderFriends();
+  renderGroups();
   $('#chatTitle').textContent = message;
   $('#chatStatus').textContent = status;
   messagesEl.innerHTML = '<div class="welcome"><h3>请选择好友</h3><p>从左侧好友列表选择一个好友开始聊天。</p></div>';
@@ -806,7 +953,7 @@ async function deleteFriend(friendId) {
     const data = await api(`/api/friends/${friendId}`, { method: 'DELETE' });
     toast(data.message);
     await loadMe();
-    if (state.selectedFriend?.id === friendId) {
+    if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === friendId) {
       resetConversation('好友已删除', '请选择其他好友继续聊天');
     }
   } catch (error) {
@@ -822,7 +969,7 @@ async function clearFriendMessages(friendId) {
   try {
     const data = await api(`/api/messages/${friendId}`, { method: 'DELETE' });
     toast(data.message);
-    if (state.selectedFriend?.id === friendId) {
+    if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === friendId) {
       state.messages = [];
       renderMessages();
     }
@@ -831,16 +978,54 @@ async function clearFriendMessages(friendId) {
   }
 }
 
+async function clearGroupMessages(groupId) {
+  const group = state.groups.find(item => item.id === groupId);
+  if (!group) return;
+  if (!confirm(`确定一键清空群聊「${group.name}」的全部聊天记录吗？所有群成员都会看到记录被清空。`)) return;
+
+  try {
+    const data = await api(`/api/groups/${groupId}/messages`, { method: 'DELETE' });
+    toast(data.message);
+    if (state.selectedFriend?.isGroup && state.selectedFriend.id === groupId) {
+      state.messages = [];
+      renderMessages();
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function dissolveGroup(groupId) {
+  const group = state.groups.find(item => item.id === groupId);
+  if (!group) return;
+  if (group.ownerId !== state.me?.id) {
+    toast('只有群主可以解散群聊', true);
+    return;
+  }
+  if (!confirm(`确定解散群聊「${group.name}」吗？群聊消息会全部清空且不可恢复。`)) return;
+
+  try {
+    const data = await api(`/api/groups/${groupId}`, { method: 'DELETE' });
+    toast(data.message);
+    await loadMe();
+    if (state.selectedFriend?.isGroup && state.selectedFriend.id === groupId) {
+      resetConversation('群聊已解散', '该群聊消息已全部清空');
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 async function handleFriendRemoved(payload) {
   await loadMe();
-  if ([payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
+  if (!state.selectedFriend?.isGroup && [payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
     resetConversation('好友关系已解除', '该会话已不可用');
   }
   toast('好友列表已更新');
 }
 
 function handleConversationCleared(payload) {
-  if ([payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
+  if (!state.selectedFriend?.isGroup && [payload.userId, payload.friendId].includes(state.selectedFriend?.id)) {
     state.messages = [];
     resetMessageEditor();
     renderMessages();
@@ -848,10 +1033,38 @@ function handleConversationCleared(payload) {
   }
 }
 
+async function handleGroupUpdated(payload) {
+  await loadMe();
+  const group = payload?.group;
+  if (group && state.selectedFriend?.isGroup && state.selectedFriend.id === group.id) {
+    state.selectedFriend = { ...group, isGroup: true };
+    updateChatHeader();
+  }
+  toast('群聊列表已更新');
+}
+
+async function handleGroupDissolved(payload) {
+  await loadMe();
+  state.unreadFriendIds.delete(`group:${payload.groupId}`);
+  if (state.selectedFriend?.isGroup && state.selectedFriend.id === payload.groupId) {
+    resetConversation('群聊已解散', '该群聊消息已全部清空');
+  }
+  toast(`群聊「${payload.groupName || ''}」已解散`);
+}
+
+function handleGroupMessagesCleared(payload) {
+  if (state.selectedFriend?.isGroup && state.selectedFriend.id === payload.groupId) {
+    state.messages = [];
+    resetMessageEditor();
+    renderMessages();
+    toast('群聊记录已清空');
+  }
+}
+
 async function selectFriend(friend) {
   resetMessageEditor();
-  state.selectedFriend = friend;
-  state.unreadFriendIds.delete(friend.id);
+  state.selectedFriend = { ...friend, isGroup: false };
+  state.unreadFriendIds.delete(conversationKey(state.selectedFriend));
   state.messages = await api(`/api/messages/${friend.id}`);
   messageInput.disabled = false;
   fileInput.disabled = false;
@@ -860,12 +1073,36 @@ async function selectFriend(friend) {
   videoCallBtn.disabled = !state.callsEnabled || !friend.online;
   updateChatHeader();
   renderFriends();
+  renderGroups();
   renderMessages();
   markSelectedConversationRead();
 }
 
+async function selectGroup(group) {
+  resetMessageEditor();
+  state.selectedFriend = { ...group, isGroup: true };
+  state.unreadFriendIds.delete(conversationKey(state.selectedFriend));
+  state.messages = await api(`/api/groups/${group.id}/messages`);
+  messageInput.disabled = false;
+  fileInput.disabled = false;
+  sendBtn.disabled = false;
+  voiceCallBtn.disabled = true;
+  videoCallBtn.disabled = true;
+  updateChatHeader();
+  renderFriends();
+  renderGroups();
+  renderMessages();
+}
+
 function updateChatHeader() {
   if (!state.selectedFriend) return;
+  if (state.selectedFriend.isGroup) {
+    $('#chatTitle').textContent = state.selectedFriend.name;
+    $('#chatStatus').textContent = `${state.selectedFriend.memberCount || state.selectedFriend.members?.length || 0} 人群聊 · 群聊暂不支持语音或视频通话`;
+    voiceCallBtn.disabled = true;
+    videoCallBtn.disabled = true;
+    return;
+  }
   $('#chatTitle').textContent = state.selectedFriend.displayName;
   $('#chatStatus').textContent = state.selectedFriend.online
     ? (state.callsEnabled ? '在线，可发起语音或视频通话' : '在线')
@@ -895,7 +1132,12 @@ function renderMessages() {
     }
     const avatar = document.createElement('div');
     avatar.className = 'avatar message-avatar';
-    setAvatar(avatar, mine ? state.me : state.selectedFriend);
+    const sender = mine
+      ? state.me
+      : (state.selectedFriend?.isGroup
+        ? state.selectedFriend.members?.find(member => member.id === message.from)
+        : state.selectedFriend);
+    setAvatar(avatar, sender);
     const content = document.createElement('div');
     content.className = 'message-content';
     const bubble = document.createElement('div');
@@ -916,6 +1158,10 @@ function renderMessages() {
 function messageMetaText(message, mine) {
   const sentAt = new Date(message.createdAt).toLocaleString();
   const edited = message.editedAt ? ' · 已编辑' : '';
+  if (state.selectedFriend?.isGroup) {
+    const sender = mine ? '我' : (state.selectedFriend.members?.find(member => member.id === message.from)?.displayName || '群成员');
+    return `${sender} · ${sentAt}${edited}`;
+  }
   if (!mine) return `${sentAt}${edited}`;
   if (!message.readAt) return `${sentAt}${edited} · 未读`;
   return `${sentAt}${edited} · 已读`;
@@ -944,14 +1190,16 @@ function handleMessageDeleted(payload) {
 async function handleMessageEdited(payload) {
   const editedMessage = payload?.message;
   if (!editedMessage) return;
-  const friendId = editedMessage.from === state.me.id ? editedMessage.to : editedMessage.from;
-  const isCurrentConversation = state.selectedFriend?.id === friendId;
+  const isGroupMessage = Boolean(editedMessage.groupId);
+  const conversationId = isGroupMessage ? `group:${editedMessage.groupId}` : (editedMessage.from === state.me.id ? editedMessage.to : editedMessage.from);
+  const isCurrentConversation = selectedConversationKey() === conversationId;
 
   if (!isCurrentConversation) {
-    if (editedMessage.to === state.me.id) {
-      state.unreadFriendIds.add(friendId);
+    if (editedMessage.from !== state.me.id) {
+      state.unreadFriendIds.add(conversationId);
       renderFriends();
-      toast('好友更新了一条消息');
+      renderGroups();
+      toast(isGroupMessage ? '群成员更新了一条消息' : '好友更新了一条消息');
     }
     return;
   }
@@ -964,7 +1212,9 @@ async function handleMessageEdited(payload) {
   }
 
   try {
-    state.messages = await api(`/api/messages/${friendId}`);
+    state.messages = isGroupMessage
+      ? await api(`/api/groups/${editedMessage.groupId}/messages`)
+      : await api(`/api/messages/${conversationId}`);
     renderMessages();
   } catch (error) {
     toast(error.message, true);
@@ -1033,7 +1283,7 @@ function deleteMessage(messageId, button) {
 }
 
 function markSelectedConversationRead() {
-  if (!state.socket?.connected || !state.selectedFriend) return;
+  if (!state.socket?.connected || !state.selectedFriend || state.selectedFriend.isGroup) return;
   const hasUnreadIncoming = state.messages.some(message =>
     message.from === state.selectedFriend.id &&
     message.to === state.me.id &&
@@ -1090,7 +1340,7 @@ function sendText() {
     return;
   }
   state.socket.emit('message:send', {
-    to: state.selectedFriend.id,
+    ...(state.selectedFriend.isGroup ? { groupId: state.selectedFriend.id } : { to: state.selectedFriend.id }),
     type: 'text',
     text
   });
@@ -1134,6 +1384,10 @@ function startVideoCall() {
 
 async function startMediaCall(type) {
   if (!state.selectedFriend || state.call) return;
+  if (state.selectedFriend.isGroup) {
+    toast('群聊暂不支持语音或视频通话', true);
+    return;
+  }
   if (!state.callsEnabled) {
     toast('语音和视频聊天功能已关闭', true);
     return;
@@ -1373,7 +1627,7 @@ fileInput.addEventListener('change', async () => {
       return;
     }
     state.socket.emit('message:send', {
-      to: state.selectedFriend.id,
+      ...(state.selectedFriend.isGroup ? { groupId: state.selectedFriend.id } : { to: state.selectedFriend.id }),
       type: uploaded.type,
       file: uploaded
     });

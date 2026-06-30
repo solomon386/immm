@@ -159,6 +159,29 @@ function conversationOf(a, b) {
   return [a, b].sort().join(':');
 }
 
+function groupConversationOf(groupId) {
+  return `group:${groupId}`;
+}
+
+function isGroupMember(group, userId) {
+  return Boolean(group?.memberIds?.includes(userId));
+}
+
+function publicGroup(group) {
+  const members = (group.memberIds || [])
+    .map(userId => db.users.find(user => user.id === userId))
+    .filter(Boolean)
+    .map(publicUser);
+  return {
+    id: group.id,
+    name: group.name,
+    ownerId: group.ownerId,
+    members,
+    memberCount: members.length,
+    createdAt: group.createdAt
+  };
+}
+
 function isMessageAlive(message, now = Date.now()) {
   const createdAtMs = Date.parse(message.createdAt);
   return Number.isFinite(createdAtMs) && createdAtMs + MESSAGE_RETENTION_MS > now;
@@ -204,6 +227,10 @@ function markConversationRead(readerId, friendId) {
 function emitToUser(userId, event, payload) {
   const sockets = onlineUsers.get(userId) || new Set();
   sockets.forEach(socketId => io.to(socketId).emit(event, payload));
+}
+
+function emitToGroup(group, event, payload) {
+  group.memberIds.forEach(userId => emitToUser(userId, event, payload));
 }
 
 function forwardCallEvent(socket, event, payload = {}) {
@@ -304,6 +331,19 @@ function clearConversationMessages(userId, friendId) {
   db.messages = db.messages.filter(message => message.conversationId !== conversationId);
   return {
     conversationId,
+    removedMessageCount: removedMessages.length
+  };
+}
+
+function clearGroupMessages(groupId) {
+  pruneExpiredMessages();
+  const conversationId = groupConversationOf(groupId);
+  const removedMessages = db.messages.filter(message => message.conversationId === conversationId);
+  removedMessages.forEach(removeMessageFile);
+  db.messages = db.messages.filter(message => message.conversationId !== conversationId);
+  return {
+    conversationId,
+    groupId,
     removedMessageCount: removedMessages.length
   };
 }
@@ -616,7 +656,10 @@ app.get('/api/me', auth, (req, res) => {
       .filter(Boolean),
     requests: db.friendRequests
       .filter(request => request.to === req.user.id && request.status === 'pending')
-      .map(request => ({ ...request, fromUser: publicUser(db.users.find(user => user.id === request.from)) }))
+      .map(request => ({ ...request, fromUser: publicUser(db.users.find(user => user.id === request.from)) })),
+    groups: db.groups
+      .filter(group => isGroupMember(group, req.user.id))
+      .map(publicGroup)
   });
 });
 
@@ -839,6 +882,132 @@ app.delete('/api/friends/:friendId', auth, async (req, res) => {
   res.json({ message: '好友已删除', ...payload });
 });
 
+app.post('/api/groups', auth, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const memberIds = Array.isArray(req.body.memberIds) ? req.body.memberIds : [];
+  const uniqueFriendIds = [...new Set(memberIds)]
+    .filter(userId => userId && userId !== req.user.id && areFriends(req.user.id, userId));
+
+  if (!name) return res.status(400).json({ message: '群聊名称不能为空' });
+  if (name.length > 30) return res.status(400).json({ message: '群聊名称最多 30 个字符' });
+  if (!uniqueFriendIds.length) return res.status(400).json({ message: '请至少选择 1 位好友创建群聊' });
+
+  const group = {
+    id: uuid(),
+    name,
+    ownerId: req.user.id,
+    memberIds: [req.user.id, ...uniqueFriendIds],
+    createdAt: new Date().toISOString()
+  };
+  db.groups.push(group);
+
+  try {
+    await saveData('group:create', {
+      requestId: req.requestId,
+      groupId: group.id,
+      ownerId: group.ownerId,
+      memberCount: group.memberIds.length
+    });
+  } catch (error) {
+    logOperation('error', '群聊创建保存失败', {
+      requestId: req.requestId,
+      groupId: group.id,
+      error: error.message
+    });
+    return res.status(500).json({ message: '创建群聊失败，请稍后重试' });
+  }
+
+  const payload = { group: publicGroup(group) };
+  group.memberIds.forEach(userId => emitToUser(userId, 'group:updated', payload));
+  res.json({ message: '群聊已创建', group: payload.group });
+});
+
+app.get('/api/groups/:groupId/messages', auth, (req, res) => {
+  const group = db.groups.find(item => item.id === req.params.groupId);
+  if (!group || !isGroupMember(group, req.user.id)) {
+    return res.status(403).json({ message: '只能查看自己加入的群聊消息' });
+  }
+  const removedCount = pruneExpiredMessages();
+  if (removedCount) {
+    saveData('group:prune-on-list', {
+      requestId: req.requestId,
+      userId: req.user.id,
+      groupId: group.id,
+      removedCount
+    });
+  }
+  const conversationId = groupConversationOf(group.id);
+  res.json(db.messages.filter(message => message.conversationId === conversationId));
+});
+
+app.delete('/api/groups/:groupId/messages', auth, async (req, res) => {
+  const group = db.groups.find(item => item.id === req.params.groupId);
+  if (!group || !isGroupMember(group, req.user.id)) {
+    return res.status(403).json({ message: '只能清空自己加入的群聊消息' });
+  }
+
+  const cleanup = clearGroupMessages(group.id);
+  try {
+    await saveData('group:clear-messages', {
+      requestId: req.requestId,
+      userId: req.user.id,
+      groupId: group.id,
+      removedMessageCount: cleanup.removedMessageCount
+    });
+  } catch (error) {
+    logOperation('error', '清空群聊记录保存失败', {
+      requestId: req.requestId,
+      groupId: group.id,
+      error: error.message
+    });
+    return res.status(500).json({ message: '清空群聊记录失败，请稍后重试' });
+  }
+
+  const payload = {
+    groupId: group.id,
+    conversationId: cleanup.conversationId,
+    removedMessageCount: cleanup.removedMessageCount
+  };
+  group.memberIds.forEach(userId => emitToUser(userId, 'group:messages-cleared', payload));
+  res.json({ message: '群聊记录已清空', ...payload });
+});
+
+app.delete('/api/groups/:groupId', auth, async (req, res) => {
+  const groupIndex = db.groups.findIndex(item => item.id === req.params.groupId);
+  const group = db.groups[groupIndex];
+  if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
+  if (group.ownerId !== req.user.id) return res.status(403).json({ message: '只有群主可以解散群聊' });
+
+  const memberIds = [...group.memberIds];
+  const cleanup = clearGroupMessages(group.id);
+  db.groups.splice(groupIndex, 1);
+
+  try {
+    await saveData('group:dissolve', {
+      requestId: req.requestId,
+      userId: req.user.id,
+      groupId: group.id,
+      removedMessageCount: cleanup.removedMessageCount
+    });
+  } catch (error) {
+    logOperation('error', '解散群聊保存失败', {
+      requestId: req.requestId,
+      groupId: group.id,
+      error: error.message
+    });
+    return res.status(500).json({ message: '解散群聊失败，请稍后重试' });
+  }
+
+  const payload = {
+    groupId: group.id,
+    groupName: group.name,
+    conversationId: cleanup.conversationId,
+    removedMessageCount: cleanup.removedMessageCount
+  };
+  memberIds.forEach(userId => emitToUser(userId, 'group:dissolved', payload));
+  res.json({ message: '群聊已解散，聊天记录已清空', ...payload });
+});
+
 app.get('/api/messages/:friendId', auth, (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能查看好友消息' });
   const removedCount = pruneExpiredMessages();
@@ -956,8 +1125,13 @@ io.on('connection', socket => {
   });
 
   socket.on('message:send', payload => {
-    const { to, type, text, file } = payload || {};
-    if (!to || !areFriends(socket.user.id, to)) {
+    const { to, groupId, type, text, file } = payload || {};
+    const group = groupId ? db.groups.find(item => item.id === groupId) : null;
+    if (groupId && (!group || !isGroupMember(group, socket.user.id))) {
+      socket.emit('message:error', { message: '只能在自己加入的群聊中发送消息' });
+      return;
+    }
+    if (!groupId && (!to || !areFriends(socket.user.id, to))) {
       socket.emit('message:error', { message: '只能给好友发送消息' });
       return;
     }
@@ -969,9 +1143,10 @@ io.on('connection', socket => {
 
     const message = {
       id: uuid(),
-      conversationId: conversationOf(socket.user.id, to),
+      conversationId: group ? groupConversationOf(group.id) : conversationOf(socket.user.id, to),
       from: socket.user.id,
-      to,
+      to: group ? null : to,
+      groupId: group?.id || null,
       type,
       text: type === 'text' ? String(text).trim() : '',
       file: type === 'text' ? null : file,
@@ -985,8 +1160,13 @@ io.on('connection', socket => {
       conversationId: message.conversationId,
       fromUserId: message.from,
       toUserId: message.to,
+      groupId: message.groupId,
       type: message.type
     });
+    if (group) {
+      emitToGroup(group, 'message:new', message);
+      return;
+    }
     emitToUser(to, 'message:new', message);
     emitToUser(socket.user.id, 'message:new', message);
   });
@@ -1025,6 +1205,13 @@ io.on('connection', socket => {
     }
 
     try {
+      const group = message.groupId ? db.groups.find(item => item.id === message.groupId) : null;
+      if (message.groupId && !isGroupMember(group, socket.user.id)) {
+        const error = { ok: false, message: '只能删除自己所在群聊的消息' };
+        socket.emit('message:error', { message: error.message });
+        reply(error);
+        return;
+      }
       db.messages.splice(messageIndex, 1);
       removeMessageFile(message);
       saveData('message:delete', {
@@ -1032,15 +1219,22 @@ io.on('connection', socket => {
         messageId: message.id,
         conversationId: message.conversationId,
         fromUserId: message.from,
-        toUserId: message.to
+        toUserId: message.to,
+        groupId: message.groupId
       });
 
       const payloadToEmit = {
         messageId: message.id,
         conversationId: message.conversationId,
         from: message.from,
-        to: message.to
+        to: message.to,
+        groupId: message.groupId
       };
+      if (group) {
+        emitToGroup(group, 'message:deleted', payloadToEmit);
+        reply({ ok: true, ...payloadToEmit });
+        return;
+      }
       emitToUser(message.from, 'message:deleted', payloadToEmit);
       emitToUser(message.to, 'message:deleted', payloadToEmit);
       reply({ ok: true, ...payloadToEmit });
@@ -1083,6 +1277,13 @@ io.on('connection', socket => {
       return;
     }
 
+    const group = message.groupId ? db.groups.find(item => item.id === message.groupId) : null;
+    if (message.groupId && !isGroupMember(group, socket.user.id)) {
+      const error = { ok: false, message: '只能编辑自己所在群聊的消息' };
+      socket.emit('message:error', { message: error.message });
+      reply(error);
+      return;
+    }
     message.text = nextText;
     message.editedAt = new Date().toISOString();
     saveData('message:edit', {
@@ -1090,7 +1291,8 @@ io.on('connection', socket => {
       messageId: message.id,
       conversationId: message.conversationId,
       fromUserId: message.from,
-      toUserId: message.to
+      toUserId: message.to,
+      groupId: message.groupId
     });
 
     const payloadToEmit = {
@@ -1099,8 +1301,14 @@ io.on('connection', socket => {
       messageId: message.id,
       conversationId: message.conversationId,
       from: message.from,
-      to: message.to
+      to: message.to,
+      groupId: message.groupId
     };
+    if (group) {
+      emitToGroup(group, 'message:edited', payloadToEmit);
+      reply(payloadToEmit);
+      return;
+    }
     emitToUser(message.from, 'message:edited', payloadToEmit);
     emitToUser(message.to, 'message:edited', payloadToEmit);
     reply(payloadToEmit);

@@ -24,4 +24,12 @@ CREATE TABLE IF NOT EXISTS friendships (
   PRIMARY KEY (user_a_id, user_b_id)
 );
 
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  member_ids_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_user_id, status);
