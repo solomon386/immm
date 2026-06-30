@@ -111,14 +111,15 @@
                   <div class="composer-input-wrap">
                     <div id="screenshotPreview" class="screenshot-preview hidden">
                       <img id="screenshotPreviewImg" alt="截图预览" />
+                      <span id="screenshotPreviewName"></span>
                       <button id="clearScreenshotBtn" type="button" aria-label="移除截图">×</button>
                     </div>
                     <input id="messageInput" placeholder="输入文本消息..." disabled />
                   </div>
                   <button id="screenshotBtn" class="ghost tool-btn" type="button" disabled>截图</button>
                   <label class="file-btn">
-                    媒体
-                    <input id="fileInput" type="file" accept="image/*,audio/*,video/*" hidden disabled />
+                    文件
+                    <input id="fileInput" type="file" accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.md" hidden disabled />
                   </label>
                   <button id="sendBtn" class="primary" type="submit" disabled>发送</button>
                 </form>

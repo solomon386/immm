@@ -24,8 +24,8 @@ const state = {
     chat: false,
     friend: false
   },
-  pendingScreenshot: null,
-  pendingScreenshotPreviewUrl: ''
+  pendingAttachment: null,
+  pendingAttachmentPreviewUrl: ''
 };
 
 const $ = selector => document.querySelector(selector);
@@ -59,6 +59,7 @@ const fileInput = $('#fileInput');
 const screenshotBtn = $('#screenshotBtn');
 const screenshotPreview = $('#screenshotPreview');
 const screenshotPreviewImg = $('#screenshotPreviewImg');
+const screenshotPreviewName = $('#screenshotPreviewName');
 const clearScreenshotBtn = $('#clearScreenshotBtn');
 const sendBtn = $('#sendBtn');
 const voiceCallBtn = $('#voiceCallBtn');
@@ -1801,8 +1802,8 @@ function renderMessageBody(message) {
 
 $('#messageForm').addEventListener('submit', event => {
   event.preventDefault();
-  if (state.pendingScreenshot) {
-    sendPendingScreenshot();
+  if (state.pendingAttachment) {
+    sendPendingAttachment();
     return;
   }
   sendText();
@@ -1811,19 +1812,50 @@ $('#messageForm').addEventListener('submit', event => {
 screenshotBtn?.addEventListener('click', captureScreenshot);
 clearScreenshotBtn?.addEventListener('click', clearScreenshotPreview);
 
+$('#messageForm').addEventListener('dragover', event => {
+  if (!state.selectedFriend || state.editingMessageId) return;
+  event.preventDefault();
+  event.currentTarget.classList.add('drag-over');
+});
+
+$('#messageForm').addEventListener('dragleave', event => {
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    event.currentTarget.classList.remove('drag-over');
+  }
+});
+
+$('#messageForm').addEventListener('drop', event => {
+  event.preventDefault();
+  event.currentTarget.classList.remove('drag-over');
+  if (!state.selectedFriend || state.editingMessageId) return;
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) return;
+  setAttachmentPreview(file);
+  toast('文件已放入输入框预览，点击发送即可发送');
+});
+
 function clearScreenshotPreview() {
-  if (state.pendingScreenshotPreviewUrl) URL.revokeObjectURL(state.pendingScreenshotPreviewUrl);
-  state.pendingScreenshot = null;
-  state.pendingScreenshotPreviewUrl = '';
+  if (state.pendingAttachmentPreviewUrl) URL.revokeObjectURL(state.pendingAttachmentPreviewUrl);
+  state.pendingAttachment = null;
+  state.pendingAttachmentPreviewUrl = '';
   screenshotPreview?.classList.add('hidden');
   if (screenshotPreviewImg) screenshotPreviewImg.src = '';
+  if (screenshotPreviewName) screenshotPreviewName.textContent = '';
 }
 
-function setScreenshotPreview(file) {
+function setAttachmentPreview(file) {
   clearScreenshotPreview();
-  state.pendingScreenshot = file;
-  state.pendingScreenshotPreviewUrl = URL.createObjectURL(file);
-  screenshotPreviewImg.src = state.pendingScreenshotPreviewUrl;
+  state.pendingAttachment = file;
+  screenshotPreview.classList.toggle('document-preview', !file.type.startsWith('image/'));
+  screenshotPreviewName.textContent = file.name;
+  if (file.type.startsWith('image/')) {
+    state.pendingAttachmentPreviewUrl = URL.createObjectURL(file);
+    screenshotPreviewImg.src = state.pendingAttachmentPreviewUrl;
+    screenshotPreviewImg.classList.remove('hidden');
+  } else {
+    screenshotPreviewImg.src = '';
+    screenshotPreviewImg.classList.add('hidden');
+  }
   screenshotPreview.classList.remove('hidden');
 }
 
@@ -1851,7 +1883,7 @@ async function captureScreenshot() {
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('截图生成失败');
     const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
-    setScreenshotPreview(file);
+    setAttachmentPreview(file);
     toast('截图已放入输入框预览，点击发送即可发送');
   } catch (error) {
     if (error.name !== 'NotAllowedError') toast(error.message || '截图失败', true);
@@ -1865,8 +1897,8 @@ async function uploadAndSendFile(file) {
   const fd = new FormData();
   fd.append('file', file);
   const uploaded = await api('/api/upload', { method: 'POST', body: fd });
-  if (!['image', 'audio', 'video'].includes(uploaded.type)) {
-    throw new Error('只支持图片、语音和视频文件');
+  if (!['image', 'audio', 'video', 'file'].includes(uploaded.type)) {
+    throw new Error('只支持图片、语音、视频和常规文档文件');
   }
   state.socket.emit('message:send', {
     ...(state.selectedFriend.isGroup ? { groupId: state.selectedFriend.id } : { to: state.selectedFriend.id }),
@@ -1875,11 +1907,11 @@ async function uploadAndSendFile(file) {
   });
 }
 
-async function sendPendingScreenshot() {
-  if (!state.pendingScreenshot || !state.selectedFriend) return;
+async function sendPendingAttachment() {
+  if (!state.pendingAttachment || !state.selectedFriend) return;
   try {
     sendBtn.disabled = true;
-    await uploadAndSendFile(state.pendingScreenshot);
+    await uploadAndSendFile(state.pendingAttachment);
     clearScreenshotPreview();
   } catch (error) {
     toast(error.message, true);

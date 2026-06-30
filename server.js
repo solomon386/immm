@@ -40,6 +40,24 @@ const UPLOAD_RULES = {
     maxSize: 100 * 1024 * 1024,
     extensions: new Set(['.mp4', '.webm', '.ogg', '.mov']),
     mimes: new Set(['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'])
+  },
+  file: {
+    maxSize: 50 * 1024 * 1024,
+    extensions: new Set(['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv', '.rtf', '.md']),
+    mimes: new Set([
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain',
+      'text/csv',
+      'text/markdown',
+      'application/rtf',
+      'text/rtf'
+    ])
   }
 };
 
@@ -263,6 +281,7 @@ function uploadTypeFromMime(mime) {
   if (UPLOAD_RULES.image.mimes.has(mime)) return 'image';
   if (UPLOAD_RULES.audio.mimes.has(mime)) return 'audio';
   if (UPLOAD_RULES.video.mimes.has(mime)) return 'video';
+  if (UPLOAD_RULES.file.mimes.has(mime)) return 'file';
   return null;
 }
 
@@ -275,8 +294,13 @@ function hasAllowedExtensionForType(filename, type) {
 }
 
 function isAllowedUploadMeta(file) {
-  const type = uploadTypeFromMime(file.mimetype);
+  const type = uploadTypeFromMime(file.mimetype) || uploadTypeFromExtension(file.originalname);
   return Boolean(type && hasAllowedExtensionForType(file.originalname, type));
+}
+
+function uploadTypeFromExtension(filename) {
+  const extension = getSafeExtension(filename);
+  return Object.keys(UPLOAD_RULES).find(type => UPLOAD_RULES[type].extensions.has(extension)) || null;
 }
 
 function isRiff(buffer, signature) {
@@ -298,6 +322,9 @@ function detectFileSignature(buffer) {
   if (buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'OggS') return 'ogg';
   if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return 'webm';
   if (isFtyp(buffer)) return 'mp4-family';
+  if (buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === '%PDF') return 'pdf';
+  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) return 'zip';
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))) return 'ole';
   return null;
 }
 
@@ -305,9 +332,14 @@ function signatureAllowedForUpload(type, signature) {
   const allowed = {
     image: new Set(['jpg', 'png', 'gif', 'webp']),
     audio: new Set(['mp3', 'mpeg-audio', 'wav', 'ogg', 'webm', 'mp4-family']),
-    video: new Set(['ogg', 'webm', 'mp4-family'])
+    video: new Set(['ogg', 'webm', 'mp4-family']),
+    file: new Set(['pdf', 'zip', 'ole'])
   };
   return allowed[type]?.has(signature);
+}
+
+function isTextDocumentExtension(extension) {
+  return new Set(['.txt', '.csv', '.rtf', '.md']).has(extension);
 }
 
 function removeUploadedFile(file) {
@@ -349,15 +381,15 @@ function clearGroupMessages(groupId) {
 }
 
 function validateUploadedFile(file) {
-  const type = uploadTypeFromMime(file.mimetype);
+  const type = uploadTypeFromMime(file.mimetype) || uploadTypeFromExtension(file.originalname);
   if (!type || !hasAllowedExtensionForType(file.originalname, type)) {
-    throw new Error('只允许上传受支持的图片、语音或视频文件');
+    throw new Error('只允许上传受支持的图片、语音、视频或常规文档文件');
   }
   if (file.size <= 0) {
     throw new Error('不能上传空文件');
   }
   if (file.size > UPLOAD_RULES[type].maxSize) {
-    throw new Error(`${type === 'image' ? '图片' : type === 'audio' ? '语音' : '视频'}文件过大`);
+    throw new Error(`${type === 'image' ? '图片' : type === 'audio' ? '语音' : type === 'video' ? '视频' : '文档'}文件过大`);
   }
 
   const fd = fs.openSync(file.path, 'r');
@@ -365,6 +397,8 @@ function validateUploadedFile(file) {
     const header = Buffer.alloc(32);
     const bytesRead = fs.readSync(fd, header, 0, header.length, 0);
     const signature = detectFileSignature(header.subarray(0, bytesRead));
+    const extension = getSafeExtension(file.originalname);
+    if (type === 'file' && isTextDocumentExtension(extension)) return type;
     if (!signatureAllowedForUpload(type, signature)) {
       throw new Error('文件内容与声明类型不匹配，已拒绝上传');
     }
@@ -575,7 +609,7 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_SIZE, files: 1 },
   fileFilter: (_req, file, cb) => {
     if (!isAllowedUploadMeta(file)) {
-      cb(new Error('只允许上传 jpg、png、gif、webp、mp3、wav、ogg、webm、m4a、aac、mp4、mov 文件'));
+      cb(new Error('只允许上传受支持的图片、语音、视频、PDF、Office、文本等常规文件'));
       return;
     }
     cb(null, true);
@@ -1255,7 +1289,7 @@ io.on('connection', socket => {
       socket.emit('message:error', { message: '只能给好友发送消息' });
       return;
     }
-    if (!['text', 'image', 'audio', 'video'].includes(type)) {
+    if (!['text', 'image', 'audio', 'video', 'file'].includes(type)) {
       socket.emit('message:error', { message: '不支持的消息类型' });
       return;
     }

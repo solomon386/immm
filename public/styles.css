@@ -1054,6 +1054,12 @@ input:focus {
   z-index: 2;
 }
 
+.composer.drag-over {
+  outline: 2px dashed var(--brand);
+  outline-offset: -10px;
+  background: rgba(79, 70, 229, 0.08);
+}
+
 .composer-input-wrap {
   display: grid;
   gap: 8px;
@@ -1076,6 +1082,35 @@ input:focus {
   max-height: 160px;
   border-radius: 10px;
   object-fit: contain;
+}
+
+.screenshot-preview span {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.screenshot-preview.document-preview {
+  min-width: 220px;
+  padding: 12px 36px 12px 14px;
+}
+
+.screenshot-preview.document-preview::before {
+  content: '文件';
+  display: inline-grid;
+  place-items: center;
+  margin-right: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--brand);
 }
 
 .screenshot-preview button {
