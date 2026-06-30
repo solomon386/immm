@@ -165,6 +165,18 @@ input:focus {
   background: #fff1f2;
 }
 
+#notificationBtn.enabled {
+  color: #047857;
+  border-color: #bbf7d0;
+  background: #ecfdf5;
+}
+
+#notificationBtn.blocked {
+  color: var(--danger);
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
 .chat-shell {
   width: min(1220px, 100%);
   height: min(820px, calc(100vh - 56px));
@@ -190,7 +202,7 @@ input:focus {
 
 .profile {
   display: grid;
-  grid-template-columns: 48px 1fr auto auto;
+  grid-template-columns: 48px 1fr auto auto auto;
   gap: 12px;
   align-items: center;
 }
@@ -756,7 +768,7 @@ input:focus {
   }
 
   .profile {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto auto;
     gap: 8px;
   }
 
@@ -901,6 +913,11 @@ input:focus {
   .profile #editProfileBtn {
     grid-column: 3;
     grid-row: 2;
+  }
+
+  .profile #notificationBtn {
+    grid-column: 3;
+    grid-row: 3;
   }
 
   .profile-editor {

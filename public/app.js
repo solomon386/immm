@@ -27,6 +27,7 @@ const authForm = $('#authForm');
 const authSubmit = $('#authSubmit');
 const authTip = $('#authTip');
 const displayNameWrap = $('#displayNameWrap');
+const notificationBtn = $('#notificationBtn');
 const editProfileBtn = $('#editProfileBtn');
 const profileForm = $('#profileForm');
 const profileDisplayName = $('#profileDisplayName');
@@ -64,6 +65,8 @@ const contextEditMessageBtn = $('#contextEditMessageBtn');
 const rtcConfig = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 };
+let titleFlashTimer = null;
+const originalTitle = document.title;
 
 function toast(message, error = false) {
   authTip.textContent = message;
@@ -95,23 +98,24 @@ function messagePreview(message) {
   if (message.type === 'image') return '[图片]';
   if (message.type === 'audio') return '[音频]';
   if (message.type === 'video') return '[视频]';
-  return message.text || '收到一条新消息';
+  const text = message.text || '收到一条新消息';
+  return text.length > 80 ? `${text.slice(0, 80)}...` : text;
 }
 
-function ensureAudioContext() {
+async function ensureAudioContext() {
   if (!window.AudioContext && !window.webkitAudioContext) return null;
   if (!state.audioContext) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     state.audioContext = new AudioContextClass();
   }
   if (state.audioContext.state === 'suspended') {
-    state.audioContext.resume().catch(() => {});
+    await state.audioContext.resume().catch(() => {});
   }
   return state.audioContext;
 }
 
-function playMessageSound() {
-  const audioContext = ensureAudioContext();
+async function playMessageSound() {
+  const audioContext = await ensureAudioContext();
   if (!audioContext || audioContext.state !== 'running') return;
 
   const oscillator = audioContext.createOscillator();
@@ -129,33 +133,85 @@ function playMessageSound() {
 }
 
 async function requestNotificationPermission() {
-  if (!('Notification' in window)) return;
-  if (Notification.permission !== 'default' || state.notificationPermissionRequested) return;
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission !== 'default') return Notification.permission;
+  if (state.notificationPermissionRequested) return Notification.permission;
   state.notificationPermissionRequested = true;
   try {
     const permission = await Notification.requestPermission();
     if (permission === 'default') state.notificationPermissionRequested = false;
+    updateNotificationButton();
+    return permission;
   } catch {
     // 浏览器可能要求在用户手势内申请权限，失败时等待下一次用户交互。
     state.notificationPermissionRequested = false;
+    updateNotificationButton();
+    return Notification.permission;
   }
 }
 
-function prepareMessageNotifications() {
-  ensureAudioContext();
-  requestNotificationPermission();
+async function prepareMessageNotifications(showResult = false) {
+  await ensureAudioContext();
+  const permission = await requestNotificationPermission();
+  updateNotificationButton();
+  if (!showResult) return permission;
+  if (permission === 'granted') {
+    await playMessageSound();
+    toast('新消息提醒已开启');
+  } else if (permission === 'denied') {
+    toast('浏览器通知已被拒绝，请在浏览器网站权限中重新允许通知', true);
+  } else if (permission === 'unsupported') {
+    toast('当前浏览器不支持系统通知，将仅保留页面未读提醒', true);
+  } else {
+    toast('请在浏览器弹出的权限窗口中允许通知');
+  }
+  return permission;
+}
+
+function updateNotificationButton() {
+  if (!notificationBtn) return;
+  notificationBtn.classList.remove('enabled', 'blocked');
+  if (!('Notification' in window)) {
+    notificationBtn.textContent = '不支持提醒';
+    notificationBtn.disabled = true;
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    notificationBtn.textContent = '提醒已开';
+    notificationBtn.classList.add('enabled');
+    notificationBtn.disabled = false;
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    notificationBtn.textContent = '提醒被拒';
+    notificationBtn.classList.add('blocked');
+    notificationBtn.disabled = false;
+    return;
+  }
+  notificationBtn.textContent = '开启提醒';
+  notificationBtn.disabled = false;
+}
+
+function flashDocumentTitle(friend, message) {
+  const unreadCount = state.unreadFriendIds.size;
+  const sender = friend?.displayName || friend?.username || '好友';
+  document.title = `(${unreadCount}) ${sender}: ${messagePreview(message)}`;
+  if (titleFlashTimer) clearTimeout(titleFlashTimer);
+  titleFlashTimer = setTimeout(() => {
+    document.title = unreadCount ? `(${unreadCount}) ${originalTitle}` : originalTitle;
+  }, 3000);
 }
 
 function showBrowserMessageNotification(friend, message) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const notification = new Notification(`来自 ${friend?.displayName || friend?.username || '好友'} 的新消息`, {
     body: messagePreview(message),
-    icon: friend?.avatarUrl || undefined,
     tag: `message:${message.id}`,
     renotify: false
   });
   notification.onclick = () => {
     window.focus();
+    if (friend) selectFriend(friend);
     notification.close();
   };
 }
@@ -164,6 +220,7 @@ function notifyIncomingMessage(friendId, message) {
   const friend = state.friends.find(item => item.id === friendId);
   playMessageSound();
   showBrowserMessageNotification(friend, message);
+  flashDocumentTitle(friend, message);
 }
 
 async function api(url, options = {}) {
@@ -213,7 +270,7 @@ function setAvatar(el, user) {
 function showChat() {
   authView.classList.add('hidden');
   chatView.classList.remove('hidden');
-  requestNotificationPermission();
+  updateNotificationButton();
 }
 
 function showAuth() {
@@ -235,6 +292,7 @@ function clearLocalUserData() {
   state.contextMessageId = null;
   state.editingMessageId = null;
   state.notificationPermissionRequested = false;
+  document.title = originalTitle;
 
   authForm.reset();
   authTip.textContent = '';
@@ -407,7 +465,6 @@ authForm.addEventListener('submit', async event => {
     await loadMe();
     connectSocket();
     showChat();
-    prepareMessageNotifications();
     authForm.reset();
   } catch (error) {
     toast(error.message, true);
@@ -415,15 +472,22 @@ authForm.addEventListener('submit', async event => {
 });
 
 document.addEventListener('pointerdown', () => {
-  if (state.token) prepareMessageNotifications();
-}, { once: true });
+  if (state.token) ensureAudioContext();
+});
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && state.selectedFriend && state.unreadFriendIds.has(state.selectedFriend.id)) {
-    state.unreadFriendIds.delete(state.selectedFriend.id);
-    renderFriends();
-    markSelectedConversationRead();
+  if (!document.hidden) {
+    document.title = state.unreadFriendIds.size ? `(${state.unreadFriendIds.size}) ${originalTitle}` : originalTitle;
+    if (state.selectedFriend && state.unreadFriendIds.has(state.selectedFriend.id)) {
+      state.unreadFriendIds.delete(state.selectedFriend.id);
+      renderFriends();
+      markSelectedConversationRead();
+    }
   }
+});
+
+notificationBtn?.addEventListener('click', () => {
+  prepareMessageNotifications(true);
 });
 
 loginTab.addEventListener('click', () => setMode('login'));
