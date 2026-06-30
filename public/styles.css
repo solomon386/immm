@@ -370,6 +370,72 @@ input:focus {
   color: var(--danger);
 }
 
+/* ===== 群成员管理 ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100dvh - 40px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  overflow: hidden;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 90px rgba(15, 23, 42, 0.24);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal-header h2 {
+  margin-bottom: 4px;
+  font-size: 20px;
+}
+
+.modal-header p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.group-member-row {
+  min-height: 54px;
+}
+
+.group-add-member-panel {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.group-add-member-panel h3 {
+  margin-bottom: 0;
+  font-size: 15px;
+}
+
+#groupMemberListView,
+#groupAddMemberList {
+  max-height: 240px;
+}
+
 /* ===== 原有组件样式（保留） ===== */
 .chat-shell {
   width: min(1220px, 100%);

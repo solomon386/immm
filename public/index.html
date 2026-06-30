@@ -69,6 +69,7 @@
                     <p id="chatStatus">好友上线后可实时收发消息</p>
                   </div>
                   <div class="call-actions">
+                    <button id="groupMembersBtn" class="ghost hidden" type="button">群成员</button>
                     <button id="voiceCallBtn" class="call-btn voice" type="button" disabled>语音通话</button>
                     <button id="videoCallBtn" class="call-btn" type="button" disabled>视频通话</button>
                   </div>
@@ -258,6 +259,24 @@
     <div id="messageContextMenu" class="context-menu hidden">
       <button id="contextEditMessageBtn" type="button">撤回编辑</button>
       <button id="contextDeleteMessageBtn" class="danger-item" type="button">删除消息</button>
+    </div>
+
+    <div id="groupMemberModal" class="modal-overlay hidden">
+      <section class="modal-card">
+        <header class="modal-header">
+          <div>
+            <h2 id="groupMemberTitle">群成员</h2>
+            <p id="groupMemberSummary">查看和管理群成员</p>
+          </div>
+          <button id="closeGroupMemberModalBtn" class="ghost" type="button">关闭</button>
+        </header>
+        <div id="groupMemberListView" class="list compact empty">暂无成员</div>
+        <div id="groupAddMemberPanel" class="group-add-member-panel hidden">
+          <h3>添加新成员</h3>
+          <div id="groupAddMemberList" class="list compact empty">暂无可添加好友</div>
+          <button id="addGroupMembersBtn" class="primary" type="button">添加选中成员</button>
+        </div>
+      </section>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>

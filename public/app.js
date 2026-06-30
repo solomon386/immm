@@ -69,6 +69,15 @@ const contextClearMessagesBtn = $('#contextClearMessagesBtn');
 const messageContextMenu = $('#messageContextMenu');
 const contextDeleteMessageBtn = $('#contextDeleteMessageBtn');
 const contextEditMessageBtn = $('#contextEditMessageBtn');
+const groupMembersBtn = $('#groupMembersBtn');
+const groupMemberModal = $('#groupMemberModal');
+const closeGroupMemberModalBtn = $('#closeGroupMemberModalBtn');
+const groupMemberTitle = $('#groupMemberTitle');
+const groupMemberSummary = $('#groupMemberSummary');
+const groupMemberListView = $('#groupMemberListView');
+const groupAddMemberPanel = $('#groupAddMemberPanel');
+const groupAddMemberList = $('#groupAddMemberList');
+const addGroupMembersBtn = $('#addGroupMembersBtn');
 const tabChat = $('#tabChat');
 const tabFriend = $('#tabFriend');
 const tabMe = $('#tabMe');
@@ -462,6 +471,7 @@ function connectSocket() {
   state.socket.on('group:updated', handleGroupUpdated);
   state.socket.on('group:dissolved', handleGroupDissolved);
   state.socket.on('group:messages-cleared', handleGroupMessagesCleared);
+  state.socket.on('group:member-removed', handleGroupMemberRemoved);
   state.socket.on('profile:updated', payload => {
     state.me = payload.user;
     $('#myName').textContent = state.me.displayName;
@@ -916,6 +926,12 @@ function renderChatList() {
 }
 
 createGroupBtn?.addEventListener('click', createGroup);
+groupMembersBtn?.addEventListener('click', openGroupMemberModal);
+closeGroupMemberModalBtn?.addEventListener('click', closeGroupMemberModal);
+groupMemberModal?.addEventListener('click', event => {
+  if (event.target === groupMemberModal) closeGroupMemberModal();
+});
+addGroupMembersBtn?.addEventListener('click', addSelectedGroupMembers);
 
 async function createGroup() {
   const name = groupNameInput.value.trim();
@@ -939,6 +955,123 @@ async function createGroup() {
       item.checked = false;
     });
     await loadMe();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function upsertGroup(group) {
+  if (!group?.id) return;
+  const index = state.groupsx.findIndex(item => item.id === group.id);
+  if (index === -1) state.groupsx.push(group);
+  else state.groupsx[index] = group;
+  if (state.selectedFriend?.isGroup && state.selectedFriend.id === group.id) {
+    state.selectedFriend = { ...group, isGroup: true };
+    updateChatHeader();
+  }
+}
+
+async function openGroupMemberModal() {
+  if (!state.selectedFriend?.isGroup) return;
+  try {
+    const data = await api(`/api/groupsx/${state.selectedFriend.id}/members`);
+    upsertGroup(data.group);
+    renderGroupMemberModal(data.group);
+    groupMemberModal.classList.remove('hidden');
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function closeGroupMemberModal() {
+  groupMemberModal?.classList.add('hidden');
+}
+
+function renderGroupMemberModal(group) {
+  const isOwner = group.ownerId === state.me?.id;
+  const memberIds = new Set(group.members.map(member => member.id));
+  groupMemberTitle.textContent = group.name;
+  groupMemberSummary.textContent = `${group.members.length} 位成员${isOwner ? ' · 你是群主，可添加或移除成员' : ''}`;
+
+  groupMemberListView.innerHTML = '';
+  groupMemberListView.classList.toggle('empty', !group.members.length);
+  if (!group.members.length) {
+    groupMemberListView.textContent = '暂无成员';
+  } else {
+    group.members.forEach(member => {
+      const item = userItem(member);
+      item.classList.add('group-member-row');
+      const actions = item.querySelector('.actions');
+      const role = document.createElement('button');
+      role.type = 'button';
+      role.disabled = true;
+      role.textContent = member.id === group.ownerId ? '群主' : '成员';
+      actions.appendChild(role);
+      if (isOwner && member.id !== group.ownerId) {
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'reject';
+        removeBtn.textContent = '移除';
+        removeBtn.addEventListener('click', () => removeGroupMember(group.id, member.id, member.displayName));
+        actions.appendChild(removeBtn);
+      }
+      groupMemberListView.appendChild(item);
+    });
+  }
+
+  groupAddMemberPanel.classList.toggle('hidden', !isOwner);
+  groupAddMemberList.innerHTML = '';
+  const candidates = state.friends.filter(friend => !memberIds.has(friend.id));
+  groupAddMemberList.classList.toggle('empty', !candidates.length);
+  addGroupMembersBtn.disabled = !candidates.length;
+  if (!candidates.length) {
+    groupAddMemberList.textContent = '暂无可添加好友';
+    return;
+  }
+  candidates.forEach(friend => {
+    const label = document.createElement('label');
+    label.className = 'group-member-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = friend.id;
+    const span = document.createElement('span');
+    span.textContent = `${friend.displayName}（@${friend.username}）`;
+    label.append(checkbox, span);
+    groupAddMemberList.appendChild(label);
+  });
+}
+
+async function addSelectedGroupMembers() {
+  if (!state.selectedFriend?.isGroup) return;
+  const memberIds = [...groupAddMemberList.querySelectorAll('input[type="checkbox"]:checked')].map(item => item.value);
+  if (!memberIds.length) {
+    toast('请选择要添加的好友', true);
+    return;
+  }
+  try {
+    const data = await api(`/api/groupsx/${state.selectedFriend.id}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ memberIds })
+    });
+    upsertGroup(data.group);
+    renderChatList();
+    renderGroups();
+    renderGroupMemberModal(data.group);
+    toast(data.message);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+async function removeGroupMember(groupId, memberId, displayName) {
+  if (!confirm(`确定将「${displayName}」移出群聊吗？`)) return;
+  try {
+    const data = await api(`/api/groupsx/${groupId}/members/${memberId}`, { method: 'DELETE' });
+    upsertGroup(data.group);
+    renderChatList();
+    renderGroups();
+    renderGroupMemberModal(data.group);
+    toast(data.message);
   } catch (error) {
     toast(error.message, true);
   }
@@ -1019,6 +1152,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') {
     hideFriendContextMenu();
     hideMessageContextMenu();
+    closeGroupMemberModal();
     if (state.editingMessageId) {
       messageInput.value = '';
       resetMessageEditor();
@@ -1042,6 +1176,8 @@ function resetConversation(message = '请选择好友开始聊天', status = '�
   sendBtn.disabled = true;
   voiceCallBtn.disabled = true;
   videoCallBtn.disabled = true;
+  groupMembersBtn.classList.add('hidden');
+  closeGroupMemberModal();
   chatConversationView.classList.add('hidden');
   chatListView.classList.remove('hidden');
   renderChatList();
@@ -1142,9 +1278,13 @@ function handleConversationCleared(payload) {
 async function handleGroupUpdated(payload) {
   await loadMe();
   const group = payload?.group;
-  if (group && state.selectedFriend?.isGroup && state.selectedFriend.id === group.id) {
-    state.selectedFriend = { ...group, isGroup: true };
-    updateChatHeader();
+  if (group) {
+    upsertGroup(group);
+    renderChatList();
+    renderGroups();
+    if (!groupMemberModal.classList.contains('hidden') && state.selectedFriend?.isGroup && state.selectedFriend.id === group.id) {
+      renderGroupMemberModal(group);
+    }
   }
   toast('群聊列表已更新');
 }
@@ -1153,9 +1293,20 @@ async function handleGroupDissolved(payload) {
   await loadMe();
   state.unreadFriendIds.delete(`group:${payload.groupId}`);
   if (state.selectedFriend?.isGroup && state.selectedFriend.id === payload.groupId) {
+    closeGroupMemberModal();
     resetConversation('群聊已解散', '该群聊消息已全部清空');
   }
   toast(`群聊「${payload.groupName || ''}」已解散`);
+}
+
+async function handleGroupMemberRemoved(payload) {
+  await loadMe();
+  state.unreadFriendIds.delete(`group:${payload.groupId}`);
+  if (state.selectedFriend?.isGroup && state.selectedFriend.id === payload.groupId) {
+    closeGroupMemberModal();
+    resetConversation('你已被移出群聊', '该群聊已不可用');
+  }
+  toast(`你已被移出群聊「${payload.groupName || ''}」`, true);
 }
 
 function handleGroupMessagesCleared(payload) {
@@ -1169,6 +1320,7 @@ function handleGroupMessagesCleared(payload) {
 
 async function selectFriend(friend) {
   resetMessageEditor();
+  closeGroupMemberModal();
   state.selectedFriend = { ...friend, isGroup: false };
   state.unreadFriendIds.delete(conversationKey(state.selectedFriend));
   state.messages = await api(`/api/messages/${friend.id}`);
@@ -1207,10 +1359,12 @@ function updateChatHeader() {
   if (state.selectedFriend.isGroup) {
     $('#chatTitle').textContent = state.selectedFriend.name;
     $('#chatStatus').textContent = `${state.selectedFriend.memberCount || state.selectedFriend.members?.length || 0} 人群聊 · 群聊暂不支持语音或视频通话`;
+    groupMembersBtn.classList.remove('hidden');
     voiceCallBtn.disabled = true;
     videoCallBtn.disabled = true;
     return;
   }
+  groupMembersBtn.classList.add('hidden');
   $('#chatTitle').textContent = state.selectedFriend.displayName;
   $('#chatStatus').textContent = state.selectedFriend.online
     ? (state.callsEnabled ? '在线，可发起语音或视频通话' : '在线')

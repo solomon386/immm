@@ -932,6 +932,85 @@ app.post('/api/groupsx', auth, async (req, res) => {
   res.json({ message: '群聊已创建', group: payload.group });
 });
 
+app.get('/api/groupsx/:groupId/members', auth, (req, res) => {
+  const group = db.groupsx.find(item => item.id === req.params.groupId);
+  if (!group || !isGroupMember(group, req.user.id)) {
+    return res.status(403).json({ message: '只能查看自己加入的群聊成员' });
+  }
+  res.json({ group: publicGroup(group) });
+});
+
+app.post('/api/groupsx/:groupId/members', auth, async (req, res) => {
+  const group = db.groupsx.find(item => item.id === req.params.groupId);
+  if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
+  if (group.ownerId !== req.user.id) return res.status(403).json({ message: '只有群主可以添加群成员' });
+
+  const memberIds = Array.isArray(req.body.memberIds) ? req.body.memberIds : [];
+  const nextMemberIds = [...new Set(memberIds)]
+    .filter(userId => userId && userId !== req.user.id)
+    .filter(userId => !group.memberIds.includes(userId))
+    .filter(userId => areFriends(req.user.id, userId));
+
+  if (!nextMemberIds.length) return res.status(400).json({ message: '请选择未加入群聊的好友' });
+
+  group.memberIds.push(...nextMemberIds);
+  try {
+    await saveData('group:add-members', {
+      requestId: req.requestId,
+      userId: req.user.id,
+      groupId: group.id,
+      addedMemberCount: nextMemberIds.length,
+      memberCount: group.memberIds.length
+    });
+  } catch (error) {
+    logOperation('error', '添加群成员保存失败', {
+      requestId: req.requestId,
+      groupId: group.id,
+      error: error.message
+    });
+    return res.status(500).json({ message: '添加群成员失败，请稍后重试' });
+  }
+
+  const payload = { group: publicGroup(group) };
+  group.memberIds.forEach(userId => emitToUser(userId, 'group:updated', payload));
+  res.json({ message: '群成员已添加', group: payload.group });
+});
+
+app.delete('/api/groupsx/:groupId/members/:memberId', auth, async (req, res) => {
+  const group = db.groupsx.find(item => item.id === req.params.groupId);
+  if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
+  if (group.ownerId !== req.user.id) return res.status(403).json({ message: '只有群主可以移除群成员' });
+  if (req.params.memberId === group.ownerId) return res.status(400).json({ message: '不能移除群主' });
+  if (!group.memberIds.includes(req.params.memberId)) return res.status(404).json({ message: '该用户不在群聊中' });
+
+  group.memberIds = group.memberIds.filter(userId => userId !== req.params.memberId);
+  try {
+    await saveData('group:remove-member', {
+      requestId: req.requestId,
+      userId: req.user.id,
+      groupId: group.id,
+      removedMemberId: req.params.memberId,
+      memberCount: group.memberIds.length
+    });
+  } catch (error) {
+    logOperation('error', '移除群成员保存失败', {
+      requestId: req.requestId,
+      groupId: group.id,
+      removedMemberId: req.params.memberId,
+      error: error.message
+    });
+    return res.status(500).json({ message: '移除群成员失败，请稍后重试' });
+  }
+
+  const payload = { group: publicGroup(group) };
+  group.memberIds.forEach(userId => emitToUser(userId, 'group:updated', payload));
+  emitToUser(req.params.memberId, 'group:member-removed', {
+    groupId: group.id,
+    groupName: group.name
+  });
+  res.json({ message: '群成员已移除', group: payload.group, removedMemberId: req.params.memberId });
+});
+
 app.get('/api/groupsx/:groupId/messages', auth, (req, res) => {
   const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) {
