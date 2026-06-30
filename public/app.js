@@ -432,16 +432,10 @@ function connectSocket() {
     $('#myName').textContent = state.me.displayName;
     setAvatar($('#myAvatar'), state.me);
     profileDisplayName.value = state.me.displayName;
+    syncUserProfile(payload.user);
   });
   state.socket.on('friend:profile-updated', payload => {
-    const friend = state.friends.find(item => item.id === payload.user.id);
-    if (friend) Object.assign(friend, payload.user);
-    if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === payload.user.id) {
-      state.selectedFriend = { ...state.selectedFriend, ...payload.user };
-      updateChatHeader();
-    }
-    renderFriends();
-    renderMessages();
+    syncUserProfile(payload.user);
   });
   state.socket.on('presence:update', ({ userId, online }) => {
     const friend = state.friends.find(item => item.id === userId);
@@ -566,6 +560,7 @@ profileForm.addEventListener('submit', async event => {
     state.me = data.user;
     $('#myName').textContent = state.me.displayName;
     setAvatar($('#myAvatar'), state.me);
+    syncUserProfile(data.user);
     profileForm.classList.add('hidden');
     profileAvatarInput.value = '';
     profileAvatarFilename.textContent = '未选择文件';
@@ -652,6 +647,33 @@ function conversationKey(conversation) {
 
 function selectedConversationKey() {
   return conversationKey(state.selectedFriend);
+}
+
+function syncUserProfile(user) {
+  if (!user?.id) return;
+  const friend = state.friends.find(item => item.id === user.id);
+  if (friend) Object.assign(friend, user);
+
+  state.groupsx.forEach(group => {
+    const member = group.members?.find(item => item.id === user.id);
+    if (member) Object.assign(member, user);
+  });
+
+  if (!state.selectedFriend?.isGroup && state.selectedFriend?.id === user.id) {
+    state.selectedFriend = { ...state.selectedFriend, ...user };
+    updateChatHeader();
+  }
+
+  if (state.selectedFriend?.isGroup) {
+    const member = state.selectedFriend.members?.find(item => item.id === user.id);
+    if (member) Object.assign(member, user);
+    updateChatHeader();
+  }
+
+  renderFriends();
+  renderGroupMembers();
+  renderGroups();
+  renderMessages();
 }
 
 function groupItem(group) {

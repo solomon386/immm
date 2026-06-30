@@ -700,11 +700,18 @@ app.patch('/api/me', auth, async (req, res) => {
 
   const user = publicUser(req.user);
   emitToUser(req.user.id, 'profile:updated', { user });
+  const notifyUserIds = new Set();
   db.friendships
     .filter(pair => pair.includes(req.user.id))
     .flat()
     .filter(userId => userId !== req.user.id)
-    .forEach(friendId => emitToUser(friendId, 'friend:profile-updated', { user }));
+    .forEach(friendId => notifyUserIds.add(friendId));
+  db.groupsx
+    .filter(group => isGroupMember(group, req.user.id))
+    .flatMap(group => group.memberIds)
+    .filter(userId => userId !== req.user.id)
+    .forEach(userId => notifyUserIds.add(userId));
+  notifyUserIds.forEach(userId => emitToUser(userId, 'friend:profile-updated', { user }));
 
   res.json({ message: '个人资料已更新', user });
 });
