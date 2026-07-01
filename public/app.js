@@ -512,6 +512,8 @@ function connectSocket() {
     const isIncoming = message.from !== state.me.id;
     const shouldNotify = isIncoming && isPageInactive();
 
+    if (isIncoming && !isGroupMessage) hideTypingIndicator();
+
     if (isCurrentConversation) {
       if (!state.messages.some(item => item.id === message.id)) state.messages.push(message);
       renderMessages();
@@ -1415,6 +1417,7 @@ function resetConversation(message = '请选择好友开始聊天', status = '�
   resetMessageEditor();
   messageInput.value = '';
   clearScreenshotPreview();
+  hideTypingIndicator();
   messageInput.disabled = true;
   fileInput.disabled = true;
   sendBtn.disabled = true;
@@ -2001,6 +2004,21 @@ let lastTypingEmit = 0;
 let typingTimeout = null;
 
 messageInput.addEventListener('input', () => {
+  if (!state.selectedFriend || state.selectedFriend.isGroup || !state.socket?.connected) return;
+  const now = Date.now();
+  if (now - lastTypingEmit > TYPING_THROTTLE_MS) {
+    lastTypingEmit = now;
+    state.socket.emit('typing', { to: state.selectedFriend.id });
+  }
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    if (state.selectedFriend && !state.selectedFriend.isGroup && state.socket?.connected) {
+      state.socket.emit('stop-typing', { to: state.selectedFriend.id });
+    }
+  }, 3000);
+});
+
+messageInput.addEventListener('focus', () => {
   if (!state.selectedFriend || state.selectedFriend.isGroup || !state.socket?.connected) return;
   const now = Date.now();
   if (now - lastTypingEmit > TYPING_THROTTLE_MS) {
