@@ -73,7 +73,7 @@ let db = await dataStore.load();
 pruneExpiredMessages();
 await dataStore.save(db);
 let saveQueue = Promise.resolve();
-const ephemeralConversations = new Set();
+const ephemeralConversations = new Set((await dataStore.ephemeralStore?.list()) || []);
 
 function isEphemeralConversation(conversationId) {
   return ephemeralConversations.has(conversationId);
@@ -1302,13 +1302,14 @@ app.post('/api/messages/:friendId/read', authWithRefresh, (req, res) => {
   res.json(receipt);
 });
 
-app.post('/api/ephemeral/toggle', authWithRefresh, (req, res) => {
+app.post('/api/ephemeral/toggle', authWithRefresh, async (req, res) => {
   const { conversationId, enable } = req.body;
   if (!conversationId || typeof enable !== 'boolean') {
     return res.status(400).json({ message: '参数无效' });
   }
   if (enable) {
     ephemeralConversations.add(conversationId);
+    await dataStore.ephemeralStore?.add(conversationId);
     const removedMessages = db.messages.filter(message => message.conversationId === conversationId);
     removedMessages.forEach(removeMessageFile);
     const removedCount = removedMessages.length;
@@ -1318,6 +1319,7 @@ app.post('/api/ephemeral/toggle', authWithRefresh, (req, res) => {
     }
   } else {
     ephemeralConversations.delete(conversationId);
+    await dataStore.ephemeralStore?.delete(conversationId);
   }
   broadcastEphemeralToggle(conversationId, enable, req.user.id);
   res.json({ conversationId, enabled: enable });
@@ -1395,8 +1397,10 @@ io.on('connection', socket => {
     if (!conversationId || typeof enable !== 'boolean') return;
     if (enable) {
       ephemeralConversations.add(conversationId);
+      dataStore.ephemeralStore?.add(conversationId).catch(() => {});
     } else {
       ephemeralConversations.delete(conversationId);
+      dataStore.ephemeralStore?.delete(conversationId).catch(() => {});
     }
     broadcastEphemeralToggle(conversationId, enable, socket.user.id);
   });

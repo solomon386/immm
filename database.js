@@ -105,6 +105,7 @@ function publicMysqlConfig(config) {
 
 function createMemoryStore() {
   let data = structuredClone(defaultData);
+  const ephemeralConversations = new Set();
   return {
     type: 'memory',
     async load() {
@@ -116,7 +117,13 @@ function createMemoryStore() {
     async cleanupExpiredMediaFiles() {
       return { checked: 0, deleted: 0 };
     },
-    async close() {}
+    async close() {},
+    ephemeralStore: {
+      async add(conversationId) { ephemeralConversations.add(conversationId); },
+      async delete(conversationId) { ephemeralConversations.delete(conversationId); },
+      async has(conversationId) { return ephemeralConversations.has(conversationId); },
+      async list() { return [...ephemeralConversations]; }
+    }
   };
 }
 
@@ -162,9 +169,25 @@ async function createRedisMessageStore() {
     await client.zRemRangeByScore(globalIndexKey, 0, minAliveScore);
   }
 
+  const ephemeralKey = `${prefix}:ephemeral`;
+
   return {
     type: 'redis',
     retentionSeconds,
+    ephemeralStore: {
+      async add(conversationId) {
+        await client.sAdd(ephemeralKey, conversationId);
+      },
+      async delete(conversationId) {
+        await client.sRem(ephemeralKey, conversationId);
+      },
+      async has(conversationId) {
+        return Boolean(await client.sIsMember(ephemeralKey, conversationId));
+      },
+      async list() {
+        return await client.sMembers(ephemeralKey);
+      }
+    },
     async load() {
       await cleanupExpiredIndexEntries();
       const ids = await client.zRange(globalIndexKey, 0, -1);
@@ -439,7 +462,8 @@ function createSqliteStore(messageStore) {
     },
     async cleanupExpiredMediaFiles(now) {
       return messageStore.cleanupExpiredMediaFiles(now);
-    }
+    },
+    ephemeralStore: messageStore.ephemeralStore
   };
 }
 
@@ -625,7 +649,8 @@ async function createMysqlStore(messageStore) {
     },
     async cleanupExpiredMediaFiles(now) {
       return messageStore.cleanupExpiredMediaFiles(now);
-    }
+    },
+    ephemeralStore: messageStore.ephemeralStore
   };
 }
 
