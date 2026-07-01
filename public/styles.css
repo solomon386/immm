@@ -962,6 +962,17 @@ input:focus {
   align-items: center;
 }
 
+.ephemeral-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #ef4444, #f97316);
+  color: white;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
 .call-actions {
   display: flex;
   gap: 10px;

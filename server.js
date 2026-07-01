@@ -301,6 +301,20 @@ function emitToGroup(group, event, payload) {
   group.memberIds.forEach(userId => emitToUser(userId, event, payload));
 }
 
+function broadcastEphemeralToggle(conversationId, enable, triggeredBy) {
+  if (conversationId.startsWith('group:')) {
+    const groupId = conversationId.slice(6);
+    const group = db.groupsx.find(item => item.id === groupId);
+    if (group) emitToGroup(group, 'ephemeral:toggled', { conversationId, enable, triggeredBy });
+  } else {
+    const parts = conversationId.split(':');
+    if (parts.length === 2) {
+      emitToUser(parts[0], 'ephemeral:toggled', { conversationId, enable, triggeredBy });
+      emitToUser(parts[1], 'ephemeral:toggled', { conversationId, enable, triggeredBy });
+    }
+  }
+}
+
 function forwardCallEvent(socket, event, payload = {}) {
   const { to } = payload;
   if (!to || !areFriends(socket.user.id, to)) {
@@ -1298,6 +1312,7 @@ app.post('/api/ephemeral/toggle', authWithRefresh, (req, res) => {
   } else {
     ephemeralConversations.delete(conversationId);
   }
+  broadcastEphemeralToggle(conversationId, enable, req.user.id);
   res.json({ conversationId, enabled: enable });
 });
 
@@ -1376,6 +1391,7 @@ io.on('connection', socket => {
     } else {
       ephemeralConversations.delete(conversationId);
     }
+    broadcastEphemeralToggle(conversationId, enable, socket.user.id);
   });
 
   socket.on('message:send', payload => {

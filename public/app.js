@@ -612,6 +612,24 @@ function connectSocket() {
     cleanupCall();
     toast(payload.message, true);
   });
+  state.socket.on('ephemeral:toggled', payload => {
+    const { conversationId, enable } = payload || {};
+    if (!conversationId) return;
+    if (enable) {
+      state.ephemeralConversations.add(conversationId);
+    } else {
+      state.ephemeralConversations.delete(conversationId);
+    }
+    localStorage.setItem('ephemeralConversations', JSON.stringify([...state.ephemeralConversations]));
+    if (selectedConversationKey() === conversationId) {
+      if (enable) {
+        state.messages = [];
+        renderMessages();
+      }
+      updateChatHeader();
+    }
+    toast(enable ? '阅后即焚已开启，消息将在阅读后自动销毁' : '阅后即焚已关闭');
+  });
 }
 
 authForm.addEventListener('submit', async event => {
@@ -1387,19 +1405,6 @@ contextEphemeralBtn.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ conversationId: convId, enable })
     });
-    state.socket?.emit('ephemeral:toggle', { conversationId: convId, enable });
-    if (enable) {
-      state.ephemeralConversations.add(convId);
-      toast('阅后即焚已开启，消息将在阅读后自动销毁');
-    } else {
-      state.ephemeralConversations.delete(convId);
-      toast('阅后即焚已关闭');
-    }
-    localStorage.setItem('ephemeralConversations', JSON.stringify([...state.ephemeralConversations]));
-    if (enable && state.selectedFriend && selectedConversationKey() === convId) {
-      state.messages = [];
-      renderMessages();
-    }
   } catch (error) {
     toast(error.message, true);
   }
@@ -1645,8 +1650,10 @@ async function selectGroup(group) {
 
 function updateChatHeader() {
   if (!state.selectedFriend) return;
+  const convKey = selectedConversationKey();
+  const ephemeralTag = state.ephemeralConversations.has(convKey) ? ' <span class="ephemeral-tag">阅后即焚</span>' : '';
   if (state.selectedFriend.isGroup) {
-    $('#chatTitle').textContent = state.selectedFriend.name;
+    $('#chatTitle').innerHTML = state.selectedFriend.name + ephemeralTag;
     $('#chatStatus').textContent = `${state.selectedFriend.memberCount || state.selectedFriend.members?.length || 0} 人群聊`;
     groupMembersBtn.classList.remove('hidden');
     voiceCallBtn.classList.add('hidden');
@@ -1658,7 +1665,7 @@ function updateChatHeader() {
   groupMembersBtn.classList.add('hidden');
   voiceCallBtn.classList.remove('hidden');
   videoCallBtn.classList.remove('hidden');
-  $('#chatTitle').textContent = state.selectedFriend.displayName;
+  $('#chatTitle').innerHTML = state.selectedFriend.displayName + ephemeralTag;
   const statusDot = state.selectedFriend.online ? 'online' : '';
   $('#chatStatus').innerHTML = state.selectedFriend.online
     ? `<span class="status-dot ${statusDot}"></span>${state.callsEnabled ? '在线，可发起语音或视频通话' : '在线'}`
