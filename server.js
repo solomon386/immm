@@ -1312,15 +1312,11 @@ app.post('/api/ephemeral/toggle', authWithRefresh, async (req, res) => {
   if (enable) {
     ephemeralConversations.add(conversationId);
     await dataStore.ephemeralStore?.add(conversationId);
-    const normalizedConvId = conversationId.startsWith('group:')
-      ? conversationId
-      : conversationOf(req.user.id, conversationId);
-    const removedMessages = db.messages.filter(message => message.conversationId === normalizedConvId);
-    removedMessages.forEach(removeMessageFile);
-    const removedCount = removedMessages.length;
-    db.messages = db.messages.filter(message => message.conversationId !== normalizedConvId);
-    if (removedCount) {
-      saveData('ephemeral:clear-on-enable', { conversationId, removedCount });
+    const cleanup = conversationId.startsWith('group:')
+      ? clearGroupMessages(conversationId.slice(6))
+      : clearConversationMessages(req.user.id, conversationId);
+    if (cleanup.removedMessageCount) {
+      saveData('ephemeral:clear-on-enable', { conversationId, removedCount: cleanup.removedMessageCount });
     }
   } else {
     ephemeralConversations.delete(conversationId);
