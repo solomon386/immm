@@ -61,6 +61,7 @@ const screenshotPreviewImg = $('#screenshotPreviewImg');
 const screenshotPreviewName = $('#screenshotPreviewName');
 const clearScreenshotBtn = $('#clearScreenshotBtn');
 const sendBtn = $('#sendBtn');
+const typingIndicator = $('#typingIndicator');
 const voiceCallBtn = $('#voiceCallBtn');
 const videoCallBtn = $('#videoCallBtn');
 const callCard = $('#callCard');
@@ -119,6 +120,20 @@ const rtcConfig = {
 };
 let titleFlashTimer = null;
 const originalTitle = document.title;
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+let sessionTimer = null;
+
+function refreshSession() {
+  clearTimeout(sessionTimer);
+  if (!state.token) return;
+  sessionTimer = setTimeout(() => {
+    if (!state.token) return;
+    if (state.socket) state.socket.disconnect();
+    clearLocalUserData();
+    showAuth();
+    toast('登录已过期，请重新登录', true);
+  }, SESSION_TIMEOUT_MS);
+}
 
 function toast(message, error = false) {
   authTip.textContent = message;
@@ -290,6 +305,17 @@ async function api(url, options = {}) {
       ...(options.headers || {})
     }
   });
+  const newToken = res.headers.get('X-New-Token');
+  if (newToken && state.token) {
+    state.token = newToken;
+    localStorage.setItem('token', state.token);
+    refreshSession();
+  }
+  if (res.status === 401) {
+    clearLocalUserData();
+    showAuth();
+    throw new Error('登录已过期，请重新登录');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || '请求失败');
   return data;
@@ -401,6 +427,7 @@ function clearLocalUserData() {
   state.tabBadges.chat = false;
   state.tabBadges.friend = false;
   clearScreenshotPreview();
+  clearTimeout(sessionTimer);
   document.title = originalTitle;
 
   authForm.reset();
@@ -449,6 +476,7 @@ async function boot() {
     await loadMe();
     connectSocket();
     showChat();
+    refreshSession();
   } catch {
     clearLocalUserData();
     showAuth();
@@ -516,6 +544,14 @@ function connectSocket() {
   state.socket.on('message:deleted', handleMessageDeleted);
   state.socket.on('message:edited', handleMessageEdited);
   state.socket.on('message:error', payload => toast(payload.message, true));
+  state.socket.on('typing', ({ from }) => {
+    if (!state.selectedFriend || state.selectedFriend.isGroup) return;
+    if (from === state.selectedFriend.id) showTypingIndicator();
+  });
+  state.socket.on('stop-typing', ({ from }) => {
+    if (!state.selectedFriend || state.selectedFriend.isGroup) return;
+    if (from === state.selectedFriend.id) hideTypingIndicator();
+  });
   state.socket.on('friend:request', async () => {
     await loadMe();
     markTabBadge('friend');
@@ -591,6 +627,7 @@ authForm.addEventListener('submit', async event => {
     await loadMe();
     connectSocket();
     showChat();
+    refreshSession();
     authForm.reset();
   } catch (error) {
     toast(error.message, true);
@@ -598,11 +635,19 @@ authForm.addEventListener('submit', async event => {
 });
 
 document.addEventListener('pointerdown', () => {
-  if (state.token) ensureAudioContext();
+  if (state.token) {
+    ensureAudioContext();
+    refreshSession();
+  }
+});
+
+document.addEventListener('keydown', event => {
+  if (state.token && event.key.length === 1) refreshSession();
 });
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
+    if (state.token) refreshSession();
     document.title = state.unreadFriendIds.size ? `(${state.unreadFriendIds.size}) ${originalTitle}` : originalTitle;
     if (state.selectedFriend && state.unreadFriendIds.has(selectedConversationKey())) {
       state.unreadFriendIds.delete(selectedConversationKey());
@@ -1521,6 +1566,7 @@ function handleGroupMessagesCleared(payload) {
 async function selectFriend(friend) {
   resetMessageEditor();
   clearScreenshotPreview();
+  hideTypingIndicator();
   closeGroupMemberModal();
   state.selectedFriend = { ...friend, isGroup: false };
   state.unreadFriendIds.delete(conversationKey(state.selectedFriend));
@@ -1918,6 +1964,9 @@ function sendText() {
     text
   });
   messageInput.value = '';
+  if (!state.selectedFriend.isGroup) {
+    state.socket.emit('stop-typing', { to: state.selectedFriend.id });
+  }
 }
 
 function editMessage(messageId, text) {
@@ -1946,6 +1995,36 @@ videoCallBtn.addEventListener('click', startVideoCall);
 $('#closeCallBtn').addEventListener('click', () => endCall(true));
 $('#acceptCallBtn').addEventListener('click', acceptIncomingCall);
 $('#rejectCallBtn').addEventListener('click', rejectIncomingCall);
+
+const TYPING_THROTTLE_MS = 3000;
+let lastTypingEmit = 0;
+let typingTimeout = null;
+
+messageInput.addEventListener('input', () => {
+  if (!state.selectedFriend || state.selectedFriend.isGroup || !state.socket?.connected) return;
+  const now = Date.now();
+  if (now - lastTypingEmit > TYPING_THROTTLE_MS) {
+    lastTypingEmit = now;
+    state.socket.emit('typing', { to: state.selectedFriend.id });
+  }
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(() => {
+    if (state.selectedFriend && !state.selectedFriend.isGroup && state.socket?.connected) {
+      state.socket.emit('stop-typing', { to: state.selectedFriend.id });
+    }
+  }, 3000);
+});
+
+function showTypingIndicator() {
+  clearTimeout(typingTimeout);
+  typingIndicator?.classList.remove('hidden');
+  clearTimeout(typingTimeout);
+  typingTimeout = setTimeout(hideTypingIndicator, 4000);
+}
+
+function hideTypingIndicator() {
+  typingIndicator?.classList.add('hidden');
+}
 
 function startVoiceCall() {
   startMediaCall('audio');

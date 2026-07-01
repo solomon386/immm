@@ -15,6 +15,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const JWT_SESSION_EXPIRES_IN = '1h';
+const JWT_REFRESH_BUFFER_MS = 10 * 60 * 1000;
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const LOG_DIR = path.join(__dirname, 'logs');
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -149,8 +151,28 @@ function publicUser(user) {
   };
 }
 
-function sign(user) {
-  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+function sign(user, expiresIn) {
+  return jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: expiresIn || JWT_SESSION_EXPIRES_IN });
+}
+
+function authWithRefresh(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ message: '请先登录' });
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    const user = db.users.find(item => item.id === payload.id);
+    if (!user) return res.status(401).json({ message: '用户不存在' });
+    req.user = user;
+    const remainingMs = payload.exp * 1000 - Date.now();
+    if (remainingMs < JWT_REFRESH_BUFFER_MS) {
+      res.setHeader('X-New-Token', sign(user));
+    }
+    next();
+  } catch {
+    return res.status(401).json({ message: '登录已过期，请重新登录' });
+  }
 }
 
 function auth(req, res, next) {
@@ -695,7 +717,7 @@ app.post('/api/auth/login', async (req, res) => {
   res.json({ token: sign(user), user: publicUser(user) });
 });
 
-app.get('/api/me', auth, (req, res) => {
+app.get('/api/me', authWithRefresh, (req, res) => {
   res.json({
     user: publicUser(req.user),
     friends: db.friendships
@@ -792,7 +814,7 @@ app.patch('/api/me/password', auth, async (req, res) => {
   res.json({ message: '密码已修改' });
 });
 
-app.get('/api/users/search', auth, (req, res) => {
+app.get('/api/users/search', authWithRefresh, (req, res) => {
   const keyword = String(req.query.q || '').trim().toLowerCase();
   if (!keyword) return res.json([]);
   const users = db.users
@@ -803,7 +825,7 @@ app.get('/api/users/search', auth, (req, res) => {
   res.json(users);
 });
 
-app.post('/api/friends/request', auth, async (req, res) => {
+app.post('/api/friends/request', authWithRefresh, async (req, res) => {
   const { toUserId } = req.body;
   const target = db.users.find(user => user.id === toUserId);
   if (!target) return res.status(404).json({ message: '用户不存在' });
@@ -855,7 +877,7 @@ app.post('/api/friends/request', auth, async (req, res) => {
   res.json({ message: '好友请求已发送', request });
 });
 
-app.post('/api/friends/respond', auth, async (req, res) => {
+app.post('/api/friends/respond', authWithRefresh, async (req, res) => {
   const { requestId, accept } = req.body;
   const request = db.friendRequests.find(item => item.id === requestId && item.to === req.user.id);
   if (!request) return res.status(404).json({ message: '好友请求不存在' });
@@ -922,7 +944,7 @@ app.post('/api/friends/respond', auth, async (req, res) => {
   res.json({ message: accept ? '已添加好友' : '已拒绝请求' });
 });
 
-app.delete('/api/friends/:friendId', auth, async (req, res) => {
+app.delete('/api/friends/:friendId', authWithRefresh, async (req, res) => {
   const friend = db.users.find(user => user.id === req.params.friendId);
   if (!friend) return res.status(404).json({ message: '好友不存在' });
 
@@ -968,7 +990,7 @@ app.delete('/api/friends/:friendId', auth, async (req, res) => {
   res.json({ message: '好友已删除', ...payload });
 });
 
-app.post('/api/groupsx', auth, async (req, res) => {
+app.post('/api/groupsx', authWithRefresh, async (req, res) => {
   const name = String(req.body.name || '').trim();
   const memberIds = Array.isArray(req.body.memberIds) ? req.body.memberIds : [];
   const uniqueFriendIds = [...new Set(memberIds)]
@@ -1008,7 +1030,7 @@ app.post('/api/groupsx', auth, async (req, res) => {
   res.json({ message: '群聊已创建', group: payload.group });
 });
 
-app.get('/api/groupsx/:groupId/members', auth, (req, res) => {
+app.get('/api/groupsx/:groupId/members', authWithRefresh, (req, res) => {
   const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) {
     return res.status(403).json({ message: '只能查看自己加入的群聊成员' });
@@ -1016,7 +1038,7 @@ app.get('/api/groupsx/:groupId/members', auth, (req, res) => {
   res.json({ group: publicGroup(group) });
 });
 
-app.post('/api/groupsx/:groupId/members', auth, async (req, res) => {
+app.post('/api/groupsx/:groupId/members', authWithRefresh, async (req, res) => {
   const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
   if (group.ownerId !== req.user.id) return res.status(403).json({ message: '只有群主可以添加群成员' });
@@ -1052,7 +1074,7 @@ app.post('/api/groupsx/:groupId/members', auth, async (req, res) => {
   res.json({ message: '群成员已添加', group: payload.group });
 });
 
-app.delete('/api/groupsx/:groupId/members/:memberId', auth, async (req, res) => {
+app.delete('/api/groupsx/:groupId/members/:memberId', authWithRefresh, async (req, res) => {
   const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
   if (group.ownerId !== req.user.id) return res.status(403).json({ message: '只有群主可以移除群成员' });
@@ -1087,7 +1109,7 @@ app.delete('/api/groupsx/:groupId/members/:memberId', auth, async (req, res) => 
   res.json({ message: '群成员已移除', group: payload.group, removedMemberId: req.params.memberId });
 });
 
-app.get('/api/groupsx/:groupId/messages', auth, (req, res) => {
+app.get('/api/groupsx/:groupId/messages', authWithRefresh, (req, res) => {
   const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) {
     return res.status(403).json({ message: '只能查看自己加入的群聊消息' });
@@ -1105,7 +1127,7 @@ app.get('/api/groupsx/:groupId/messages', auth, (req, res) => {
   res.json(db.messages.filter(message => message.conversationId === conversationId));
 });
 
-app.delete('/api/groupsx/:groupId/messages', auth, async (req, res) => {
+app.delete('/api/groupsx/:groupId/messages', authWithRefresh, async (req, res) => {
   const group = db.groupsx.find(item => item.id === req.params.groupId);
   if (!group || !isGroupMember(group, req.user.id)) {
     return res.status(403).json({ message: '只能清空自己加入的群聊消息' });
@@ -1137,7 +1159,7 @@ app.delete('/api/groupsx/:groupId/messages', auth, async (req, res) => {
   res.json({ message: '群聊记录已清空', ...payload });
 });
 
-app.delete('/api/groupsx/:groupId', auth, async (req, res) => {
+app.delete('/api/groupsx/:groupId', authWithRefresh, async (req, res) => {
   const groupIndex = db.groupsx.findIndex(item => item.id === req.params.groupId);
   const group = db.groupsx[groupIndex];
   if (!group || !isGroupMember(group, req.user.id)) return res.status(404).json({ message: '群聊不存在' });
@@ -1173,7 +1195,7 @@ app.delete('/api/groupsx/:groupId', auth, async (req, res) => {
   res.json({ message: '群聊已解散，聊天记录已清空', ...payload });
 });
 
-app.get('/api/messages/:friendId', auth, (req, res) => {
+app.get('/api/messages/:friendId', authWithRefresh, (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能查看好友消息' });
   const removedCount = pruneExpiredMessages();
   if (removedCount) {
@@ -1188,7 +1210,7 @@ app.get('/api/messages/:friendId', auth, (req, res) => {
   res.json(db.messages.filter(message => message.conversationId === conversationId));
 });
 
-app.delete('/api/messages/:friendId', auth, async (req, res) => {
+app.delete('/api/messages/:friendId', authWithRefresh, async (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能清空好友会话' });
   const friend = db.users.find(user => user.id === req.params.friendId);
   if (!friend) return res.status(404).json({ message: '好友不存在' });
@@ -1228,7 +1250,7 @@ app.delete('/api/messages/:friendId', auth, async (req, res) => {
   res.json({ message: '聊天记录已清空', ...payload });
 });
 
-app.post('/api/messages/:friendId/read', auth, (req, res) => {
+app.post('/api/messages/:friendId/read', authWithRefresh, (req, res) => {
   if (!areFriends(req.user.id, req.params.friendId)) return res.status(403).json({ message: '只能标记好友消息' });
   const receipt = markConversationRead(req.user.id, req.params.friendId);
   if (receipt.messageIds.length) {
@@ -1287,6 +1309,18 @@ io.on('connection', socket => {
   socket.on('auth:logout', ack => {
     const offline = removeOnlineSocket(socket);
     if (typeof ack === 'function') ack({ ok: true, offline });
+  });
+
+  socket.on('typing', payload => {
+    const { to } = payload || {};
+    if (!to || !areFriends(socket.user.id, to)) return;
+    emitToUser(to, 'typing', { from: socket.user.id });
+  });
+
+  socket.on('stop-typing', payload => {
+    const { to } = payload || {};
+    if (!to || !areFriends(socket.user.id, to)) return;
+    emitToUser(to, 'stop-typing', { from: socket.user.id });
   });
 
   socket.on('message:send', payload => {
