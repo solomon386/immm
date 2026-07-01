@@ -957,6 +957,11 @@ input:focus {
   font-size: 18px;
 }
 
+#chatStatus {
+  display: flex;
+  align-items: center;
+}
+
 .call-actions {
   display: flex;
   gap: 10px;
@@ -1042,6 +1047,63 @@ input:focus {
 .mine .bubble {
   color: white;
   background: linear-gradient(135deg, var(--brand), #2563eb);
+}
+
+.ephemeral-hidden {
+  display: block;
+  font-style: italic;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+}
+
+.mine .ephemeral-hidden {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ephemeral-content.hidden {
+  display: none;
+}
+
+.ephemeral-timer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ephemeral-timer.hidden {
+  display: none;
+}
+
+.ephemeral-timer svg {
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
+}
+
+.ephemeral-timer .timer-circle {
+  transition: stroke-dashoffset 1s linear;
+}
+
+.ephemeral-timer .timer-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.mine .ephemeral-timer .timer-text {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.ephemeral-timer .timer-circle {
+  stroke: var(--brand);
+}
+
+.mine .ephemeral-timer .timer-circle {
+  stroke: #fff;
 }
 
 .message small,

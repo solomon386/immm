@@ -26,6 +26,7 @@ const CALLS_ENABLED = process.env.ENABLE_CALLS === 'true';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 const DEFAULT_MESSAGE_RETENTION_SECONDS = IS_PRODUCTION ? 24 * 60 * 60 : 60;
 const MESSAGE_RETENTION_MS = Number(process.env.MESSAGE_RETENTION_SECONDS || DEFAULT_MESSAGE_RETENTION_SECONDS) * 1000;
+const EPHEMERAL_MESSAGE_TTL_MS = 30 * 1000;
 const MAX_UPLOAD_SIZE = 100 * 1024 * 1024;
 const UPLOAD_RULES = {
   image: {
@@ -72,6 +73,33 @@ let db = await dataStore.load();
 pruneExpiredMessages();
 await dataStore.save(db);
 let saveQueue = Promise.resolve();
+const ephemeralConversations = new Set();
+
+function isEphemeralConversation(conversationId) {
+  return ephemeralConversations.has(conversationId);
+}
+
+setInterval(() => {
+  if (!ephemeralConversations.size) return;
+  pruneExpiredMessages();
+  pruneEphemeralMessages();
+}, 5000);
+
+function pruneEphemeralMessages() {
+  const now = Date.now();
+  let pruned = false;
+  db.messages = db.messages.filter(message => {
+    if (!isEphemeralConversation(message.conversationId)) return true;
+    const createdAtMs = Date.parse(message.createdAt);
+    if (Number.isFinite(createdAtMs) && createdAtMs + EPHEMERAL_MESSAGE_TTL_MS <= now) {
+      removeMessageFile(message);
+      pruned = true;
+      return false;
+    }
+    return true;
+  });
+  if (pruned) saveData('ephemeral:prune');
+}
 
 function dbSummary(snapshot = db) {
   return {
@@ -1260,6 +1288,23 @@ app.post('/api/messages/:friendId/read', authWithRefresh, (req, res) => {
   res.json(receipt);
 });
 
+app.post('/api/ephemeral/toggle', authWithRefresh, (req, res) => {
+  const { conversationId, enable } = req.body;
+  if (!conversationId || typeof enable !== 'boolean') {
+    return res.status(400).json({ message: '参数无效' });
+  }
+  if (enable) {
+    ephemeralConversations.add(conversationId);
+  } else {
+    ephemeralConversations.delete(conversationId);
+  }
+  res.json({ conversationId, enabled: enable });
+});
+
+app.get('/api/ephemeral/status', authWithRefresh, (req, res) => {
+  res.json({ ephemeralConversations: [...ephemeralConversations] });
+});
+
 app.post('/api/upload', auth, (req, res) => {
   upload.single('file')(req, res, error => {
     if (error) {
@@ -1323,6 +1368,16 @@ io.on('connection', socket => {
     emitToUser(to, 'stop-typing', { from: socket.user.id });
   });
 
+  socket.on('ephemeral:toggle', payload => {
+    const { conversationId, enable } = payload || {};
+    if (!conversationId || typeof enable !== 'boolean') return;
+    if (enable) {
+      ephemeralConversations.add(conversationId);
+    } else {
+      ephemeralConversations.delete(conversationId);
+    }
+  });
+
   socket.on('message:send', payload => {
     const { to, groupId, type, text, file } = payload || {};
     const group = groupId ? db.groupsx.find(item => item.id === groupId) : null;
@@ -1340,9 +1395,11 @@ io.on('connection', socket => {
     }
     if (type === 'text' && !String(text || '').trim()) return;
 
+    const convId = group ? groupConversationOf(group.id) : conversationOf(socket.user.id, to);
+    const ephemeral = isEphemeralConversation(convId);
     const message = {
       id: uuid(),
-      conversationId: group ? groupConversationOf(group.id) : conversationOf(socket.user.id, to),
+      conversationId: convId,
       from: socket.user.id,
       to: group ? null : to,
       groupId: group?.id || null,
@@ -1350,7 +1407,8 @@ io.on('connection', socket => {
       text: type === 'text' ? String(text).trim() : '',
       file: type === 'text' ? null : file,
       createdAt: new Date().toISOString(),
-      readAt: null
+      readAt: null,
+      ephemeral
     };
     db.messages.push(message);
     saveData('message:send', {

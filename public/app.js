@@ -25,7 +25,9 @@ const state = {
     friend: false
   },
   pendingAttachment: null,
-  pendingAttachmentPreviewUrl: ''
+  pendingAttachmentPreviewUrl: '',
+  ephemeralConversations: new Set(JSON.parse(localStorage.getItem('ephemeralConversations') || '[]')),
+  ephemeralTimers: new Map()
 };
 
 const $ = selector => document.querySelector(selector);
@@ -83,6 +85,7 @@ const contextDeleteFriendBtn = $('#contextDeleteFriendBtn');
 const chatContextMenu = $('#chatContextMenu');
 const contextChatClearMessagesBtn = $('#contextChatClearMessagesBtn');
 const contextDeleteConversationBtn = $('#contextDeleteConversationBtn');
+const contextEphemeralBtn = $('#contextEphemeralBtn');
 const messageContextMenu = $('#messageContextMenu');
 const contextDeleteMessageBtn = $('#contextDeleteMessageBtn');
 const contextEditMessageBtn = $('#contextEditMessageBtn');
@@ -1312,8 +1315,11 @@ function showChatContextMenu(event, conv) {
   state.contextFriendId = conv.isGroup ? null : conv.id;
   state.contextGroupId = conv.isGroup ? conv.id : null;
   contextChatClearMessagesBtn.textContent = conv.isGroup ? '清空群聊记录' : '清空聊天记录';
+  const convKey = conversationKey(conv);
+  const isEphemeral = state.ephemeralConversations.has(convKey);
+  contextEphemeralBtn.textContent = isEphemeral ? '关闭阅后即焚' : '开启阅后即焚';
   chatContextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
-  chatContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 110)}px`;
+  chatContextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - 130)}px`;
   chatContextMenu.classList.remove('hidden');
 }
 
@@ -1367,6 +1373,36 @@ contextDeleteConversationBtn.addEventListener('click', () => {
     resetConversation();
   }
   renderChatList();
+});
+
+contextEphemeralBtn.addEventListener('click', async () => {
+  const friendId = state.contextFriendId;
+  const groupId = state.contextGroupId;
+  hideChatContextMenu();
+  const convId = groupId ? `group:${groupId}` : friendId;
+  if (!convId) return;
+  const enable = !state.ephemeralConversations.has(convId);
+  try {
+    await api('/api/ephemeral/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId: convId, enable })
+    });
+    state.socket?.emit('ephemeral:toggle', { conversationId: convId, enable });
+    if (enable) {
+      state.ephemeralConversations.add(convId);
+      toast('阅后即焚已开启，消息将在阅读后自动销毁');
+    } else {
+      state.ephemeralConversations.delete(convId);
+      toast('阅后即焚已关闭');
+    }
+    localStorage.setItem('ephemeralConversations', JSON.stringify([...state.ephemeralConversations]));
+    if (enable && state.selectedFriend && selectedConversationKey() === convId) {
+      state.messages = [];
+      renderMessages();
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
 });
 
 contextDeleteMessageBtn.addEventListener('click', () => {
@@ -1623,9 +1659,10 @@ function updateChatHeader() {
   voiceCallBtn.classList.remove('hidden');
   videoCallBtn.classList.remove('hidden');
   $('#chatTitle').textContent = state.selectedFriend.displayName;
-  $('#chatStatus').textContent = state.selectedFriend.online
-    ? (state.callsEnabled ? '在线，可发起语音或视频通话' : '在线')
-    : '离线，消息会保存在聊天记录中';
+  const statusDot = state.selectedFriend.online ? 'online' : '';
+  $('#chatStatus').innerHTML = state.selectedFriend.online
+    ? `<span class="status-dot ${statusDot}"></span>${state.callsEnabled ? '在线，可发起语音或视频通话' : '在线'}`
+    : '<span class="status-dot"></span>离线，消息会保存在聊天记录中';
   voiceCallBtn.disabled = !state.callsEnabled || !state.selectedFriend.online || Boolean(state.call);
   videoCallBtn.disabled = !state.callsEnabled || !state.selectedFriend.online || Boolean(state.call);
 }
@@ -1633,10 +1670,14 @@ function updateChatHeader() {
 function renderMessages() {
   messagesEl.innerHTML = '';
   hideMessageContextMenu();
+  state.ephemeralTimers.forEach(timer => clearTimeout(timer));
+  state.ephemeralTimers.clear();
   if (!state.messages.length) {
     messagesEl.innerHTML = '<div class="welcome"><h3>还没有消息</h3><p>发送一条文本或媒体消息开始聊天。</p></div>';
     return;
   }
+  const convKey = selectedConversationKey();
+  const isEphemeralConv = state.ephemeralConversations.has(convKey);
   state.messages.forEach(message => {
     const wrap = document.createElement('div');
     const mine = message.from === state.me.id;
@@ -1661,7 +1702,11 @@ function renderMessages() {
     content.className = 'message-content';
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.appendChild(renderMessageBody(message));
+    if (isEphemeralConv && !mine && message.ephemeral) {
+      renderEphemeralBubble(bubble, message);
+    } else {
+      bubble.appendChild(renderMessageBody(message));
+    }
     const time = document.createElement('small');
     time.textContent = messageMetaText(message, mine);
     const meta = document.createElement('div');
@@ -1672,6 +1717,72 @@ function renderMessages() {
     messagesEl.appendChild(wrap);
   });
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderEphemeralBubble(bubble, message) {
+  const placeholder = document.createElement('span');
+  placeholder.className = 'ephemeral-hidden';
+  placeholder.textContent = '收到一条新消息';
+  const revealed = document.createElement('div');
+  revealed.className = 'ephemeral-content hidden';
+  revealed.appendChild(renderMessageBody(message));
+  const timer = document.createElement('div');
+  timer.className = 'ephemeral-timer';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 36 36');
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  bg.setAttribute('cx', '18'); bg.setAttribute('cy', '18'); bg.setAttribute('r', '16');
+  bg.setAttribute('fill', 'none'); bg.setAttribute('stroke', 'rgba(255,255,255,0.3)'); bg.setAttribute('stroke-width', '2');
+  const fg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  fg.setAttribute('cx', '18'); fg.setAttribute('cy', '18'); fg.setAttribute('r', '16');
+  fg.setAttribute('fill', 'none'); fg.setAttribute('stroke', '#fff'); fg.setAttribute('stroke-width', '2');
+  fg.setAttribute('stroke-dasharray', '100.53'); fg.setAttribute('stroke-dashoffset', '0');
+  fg.setAttribute('stroke-linecap', 'round'); fg.classList.add('timer-circle');
+  const countdown = document.createElement('span');
+  countdown.className = 'timer-text'; countdown.textContent = '15';
+  svg.append(bg, fg);
+  timer.append(svg, countdown);
+  bubble.append(placeholder, revealed, timer);
+
+  bubble.addEventListener('click', () => {
+    if (revealed.classList.contains('hidden')) {
+      placeholder.classList.add('hidden');
+      revealed.classList.remove('hidden');
+      timer.classList.remove('hidden');
+      startEphemeralCountdown(message, bubble, timer, fg, countdown, 15);
+    }
+  }, { once: false });
+}
+
+function startEphemeralCountdown(message, bubble, timerEl, circleEl, textEl, seconds) {
+  const total = seconds;
+  const circumference = 100.53;
+  let remaining = total;
+  circleEl.style.strokeDasharray = circumference;
+  circleEl.style.strokeDashoffset = '0';
+  textEl.textContent = remaining;
+
+  const tick = () => {
+    remaining--;
+    if (remaining <= 0) {
+      bubble.style.transition = 'opacity 0.4s, max-height 0.4s';
+      bubble.style.opacity = '0';
+      bubble.style.maxHeight = '0';
+      bubble.style.padding = '0';
+      bubble.style.margin = '0';
+      bubble.style.overflow = 'hidden';
+      setTimeout(() => {
+        bubble.remove();
+        state.messages = state.messages.filter(m => m.id !== message.id);
+      }, 400);
+      return;
+    }
+    const offset = circumference * (1 - remaining / total);
+    circleEl.style.strokeDashoffset = offset;
+    textEl.textContent = remaining;
+    state.ephemeralTimers.set(message.id, setTimeout(tick, 1000));
+  };
+  state.ephemeralTimers.set(message.id, setTimeout(tick, 1000));
 }
 
 function messageMetaText(message, mine) {
