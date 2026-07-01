@@ -89,7 +89,8 @@ function pruneEphemeralMessages() {
   const now = Date.now();
   let pruned = false;
   db.messages = db.messages.filter(message => {
-    if (!isEphemeralConversation(message.conversationId)) return true;
+    const ephemeralKey = message.groupId ? `group:${message.groupId}` : message.to;
+    if (!isEphemeralConversation(ephemeralKey)) return true;
     const createdAtMs = Date.parse(message.createdAt);
     if (Number.isFinite(createdAtMs) && createdAtMs + EPHEMERAL_MESSAGE_TTL_MS <= now) {
       removeMessageFile(message);
@@ -306,12 +307,13 @@ function broadcastEphemeralToggle(conversationId, enable, triggeredBy) {
     const groupId = conversationId.slice(6);
     const group = db.groupsx.find(item => item.id === groupId);
     if (group) emitToGroup(group, 'ephemeral:toggled', { conversationId, enable, triggeredBy });
-  } else {
+  } else if (conversationId.includes(':')) {
     const parts = conversationId.split(':');
-    if (parts.length === 2) {
-      emitToUser(parts[0], 'ephemeral:toggled', { conversationId, enable, triggeredBy });
-      emitToUser(parts[1], 'ephemeral:toggled', { conversationId, enable, triggeredBy });
-    }
+    emitToUser(parts[0], 'ephemeral:toggled', { conversationId, enable, triggeredBy });
+    emitToUser(parts[1], 'ephemeral:toggled', { conversationId, enable, triggeredBy });
+  } else {
+    emitToUser(conversationId, 'ephemeral:toggled', { conversationId, enable, triggeredBy });
+    emitToUser(triggeredBy, 'ephemeral:toggled', { conversationId, enable, triggeredBy });
   }
 }
 
@@ -1310,10 +1312,13 @@ app.post('/api/ephemeral/toggle', authWithRefresh, async (req, res) => {
   if (enable) {
     ephemeralConversations.add(conversationId);
     await dataStore.ephemeralStore?.add(conversationId);
-    const removedMessages = db.messages.filter(message => message.conversationId === conversationId);
+    const normalizedConvId = conversationId.startsWith('group:')
+      ? conversationId
+      : conversationOf(req.user.id, conversationId);
+    const removedMessages = db.messages.filter(message => message.conversationId === normalizedConvId);
     removedMessages.forEach(removeMessageFile);
     const removedCount = removedMessages.length;
-    db.messages = db.messages.filter(message => message.conversationId !== conversationId);
+    db.messages = db.messages.filter(message => message.conversationId !== normalizedConvId);
     if (removedCount) {
       saveData('ephemeral:clear-on-enable', { conversationId, removedCount });
     }
@@ -1423,7 +1428,8 @@ io.on('connection', socket => {
     if (type === 'text' && !String(text || '').trim()) return;
 
     const convId = group ? groupConversationOf(group.id) : conversationOf(socket.user.id, to);
-    const ephemeral = isEphemeralConversation(convId);
+    const ephemeralKey = group ? `group:${group.id}` : to;
+    const ephemeral = isEphemeralConversation(ephemeralKey);
     const message = {
       id: uuid(),
       conversationId: convId,
