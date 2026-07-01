@@ -1312,11 +1312,25 @@ app.post('/api/ephemeral/toggle', authWithRefresh, async (req, res) => {
   if (enable) {
     ephemeralConversations.add(conversationId);
     await dataStore.ephemeralStore?.add(conversationId);
-    const cleanup = conversationId.startsWith('group:')
-      ? clearGroupMessages(conversationId.slice(6))
-      : clearConversationMessages(req.user.id, conversationId);
-    if (cleanup.removedMessageCount) {
-      saveData('ephemeral:clear-on-enable', { conversationId, removedCount: cleanup.removedMessageCount });
+    if (conversationId.startsWith('group:')) {
+      const groupId = conversationId.slice(6);
+      const cleanup = clearGroupMessages(groupId);
+      if (cleanup.removedMessageCount) {
+        saveData('ephemeral:clear-on-enable', { conversationId, removedCount: cleanup.removedMessageCount });
+        const group = db.groupsx.find(item => item.id === groupId);
+        if (group) emitToGroup(group, 'group:messages-cleared', { groupId, conversationId: cleanup.conversationId });
+      }
+    } else {
+      const friendId = conversationId;
+      if (areFriends(req.user.id, friendId)) {
+        const cleanup = clearConversationMessages(req.user.id, friendId);
+        if (cleanup.removedMessageCount) {
+          saveData('ephemeral:clear-on-enable', { conversationId, removedCount: cleanup.removedMessageCount });
+          const payload = { userId: req.user.id, friendId, conversationId: cleanup.conversationId };
+          emitToUser(req.user.id, 'conversation:cleared', payload);
+          emitToUser(friendId, 'conversation:cleared', payload);
+        }
+      }
     }
   } else {
     ephemeralConversations.delete(conversationId);
@@ -1399,6 +1413,25 @@ io.on('connection', socket => {
     if (enable) {
       ephemeralConversations.add(conversationId);
       dataStore.ephemeralStore?.add(conversationId).catch(() => {});
+      if (conversationId.startsWith('group:')) {
+        const groupId = conversationId.slice(6);
+        const group = db.groupsx.find(item => item.id === groupId);
+        if (group && isGroupMember(group, socket.user.id)) {
+          const cleanup = clearGroupMessages(groupId);
+          if (cleanup.removedMessageCount) {
+            saveData('ephemeral:clear-on-enable', { conversationId, removedCount: cleanup.removedMessageCount });
+            emitToGroup(group, 'group:messages-cleared', { groupId, conversationId: cleanup.conversationId });
+          }
+        }
+      } else if (areFriends(socket.user.id, conversationId)) {
+        const cleanup = clearConversationMessages(socket.user.id, conversationId);
+        if (cleanup.removedMessageCount) {
+          saveData('ephemeral:clear-on-enable', { conversationId, removedCount: cleanup.removedMessageCount });
+          const payload2 = { userId: socket.user.id, friendId: conversationId, conversationId: cleanup.conversationId };
+          emitToUser(socket.user.id, 'conversation:cleared', payload2);
+          emitToUser(conversationId, 'conversation:cleared', payload2);
+        }
+      }
     } else {
       ephemeralConversations.delete(conversationId);
       dataStore.ephemeralStore?.delete(conversationId).catch(() => {});
