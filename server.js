@@ -1309,6 +1309,13 @@ app.post('/api/ephemeral/toggle', authWithRefresh, (req, res) => {
   }
   if (enable) {
     ephemeralConversations.add(conversationId);
+    const removedMessages = db.messages.filter(message => message.conversationId === conversationId);
+    removedMessages.forEach(removeMessageFile);
+    const removedCount = removedMessages.length;
+    db.messages = db.messages.filter(message => message.conversationId !== conversationId);
+    if (removedCount) {
+      saveData('ephemeral:clear-on-enable', { conversationId, removedCount });
+    }
   } else {
     ephemeralConversations.delete(conversationId);
   }
