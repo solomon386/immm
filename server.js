@@ -447,31 +447,13 @@ function clearGroupMessages(groupId) {
 }
 
 function validateUploadedFile(file) {
-  const type = uploadTypeFromMime(file.mimetype) || uploadTypeFromExtension(file.originalname);
-  if (!type || !hasAllowedExtensionForType(file.originalname, type)) {
-    throw new Error('只允许上传受支持的图片、语音、视频或常规文档文件');
-  }
+  const type = uploadTypeFromMime(file.mimetype) || uploadTypeFromExtension(file.originalname) || 'file';
   if (file.size <= 0) {
     throw new Error('不能上传空文件');
   }
-  if (file.size > UPLOAD_RULES[type].maxSize) {
-    throw new Error(`${type === 'image' ? '图片' : type === 'audio' ? '语音' : type === 'video' ? '视频' : '文档'}文件过大`);
+  if (file.size > MAX_UPLOAD_SIZE) {
+    throw new Error('文件过大，最大支持 100MB');
   }
-
-  const fd = fs.openSync(file.path, 'r');
-  try {
-    const header = Buffer.alloc(32);
-    const bytesRead = fs.readSync(fd, header, 0, header.length, 0);
-    const signature = detectFileSignature(header.subarray(0, bytesRead));
-    const extension = getSafeExtension(file.originalname);
-    if (type === 'file' && isTextDocumentExtension(extension)) return type;
-    if (!signatureAllowedForUpload(type, signature)) {
-      throw new Error('文件内容与声明类型不匹配，已拒绝上传');
-    }
-  } finally {
-    fs.closeSync(fd);
-  }
-
   return type;
 }
 
@@ -676,21 +658,14 @@ const onlineUsers = new Map();
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => {
-    const safeName = file.originalname.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
+    const safeName = file.originalname.replace(/[^\p{L}\p{N}.\-]/gu, '_');
     cb(null, `${Date.now()}-${uuid()}-${safeName}`);
   }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_UPLOAD_SIZE, files: 1 },
-  fileFilter: (_req, file, cb) => {
-    if (!isAllowedUploadMeta(file)) {
-      cb(new Error('只允许上传受支持的图片、语音、视频、PDF、Office、文本等常规文件'));
-      return;
-    }
-    cb(null, true);
-  }
+  limits: { fileSize: MAX_UPLOAD_SIZE, files: 1 }
 });
 
 app.use(requestLogger);

@@ -2049,9 +2049,6 @@ async function uploadAndSendFile(file) {
   const fd = new FormData();
   fd.append('file', file);
   const uploaded = await api('/api/upload', { method: 'POST', body: fd });
-  if (!['image', 'audio', 'video', 'file'].includes(uploaded.type)) {
-    throw new Error('只支持图片、语音、视频和常规文档文件');
-  }
   state.socket.emit('message:send', {
     ...(state.selectedFriend.isGroup ? { groupId: state.selectedFriend.id } : { to: state.selectedFriend.id }),
     type: uploaded.type,
